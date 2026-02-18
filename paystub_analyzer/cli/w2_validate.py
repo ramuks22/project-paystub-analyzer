@@ -224,13 +224,18 @@ def main() -> None:
             # Let's include everything that has a non-zero difference?
             # Or should we include everything?
             # Given "discrepancies", I'll include things where status is not MATCH.
-            if row["status"] != "MATCH":
+            # Fix(Week 5 P1): logic was filtering on uppercase "MATCH" but core returns lowercase.
+            # Also ensure we only report actual value differences.
+            status = str(row.get("status", "")).lower()
+            diff_cents_val = to_cents(row.get("difference"))
+
+            if status != "match" and diff_cents_val != 0:
                 contract_payload["discrepancies"].append(
                     {
                         "field": row["field"],
                         "paystub_value_cents": to_cents(row.get("paystub")),
                         "w2_value_cents": to_cents(row.get("w2")),
-                        "diff_cents": to_cents(row.get("difference")),
+                        "diff_cents": diff_cents_val,
                     }
                 )
 
