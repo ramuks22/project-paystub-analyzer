@@ -731,13 +731,21 @@ def build_tax_filing_package(
         comparisons, comparison_summary = compare_snapshot_to_w2(final_snapshot, w2_data, tolerance)
 
     assessment = authenticity_assessment(issues, comparisons)
+    
+    # New Filing Mode Safety Check
+    from paystub_analyzer.filing_rules import validate_filing_safety
+    
+    filing_safety = validate_filing_safety(
+        extracted_data=extracted_summary(final_snapshot),
+        comparisons=comparisons,
+        consistency_issues=[issue.__dict__ for issue in issues],
+        tolerance=tolerance,
+    )
 
-    critical_issue_count = sum(1 for issue in issues if issue.severity == "critical")
-    mismatch_count = sum(1 for row in comparisons if row.get("status") == "mismatch")
-    missing_paystub_count = sum(1 for row in comparisons if row.get("status") == "missing_paystub_value")
-    ready_to_file = bool(w2_data) and critical_issue_count == 0 and mismatch_count == 0 and missing_paystub_count == 0
+    ready_to_file = filing_safety.passed and bool(w2_data)
 
     payload: dict[str, Any] = {
+        "schema_version": "1.0.0",
         "tax_year": tax_year,
         "paystub_count_raw": len(snapshots),
         "paystub_count_canonical": len(canonical_snapshots),
@@ -747,6 +755,7 @@ def build_tax_filing_package(
         "ledger": ledger,
         "consistency_issues": [issue.__dict__ for issue in issues],
         "authenticity_assessment": assessment,
+        "filing_safety_check": filing_safety._asdict(),
         "ready_to_file": ready_to_file,
         "filing_checklist": filing_checklist(
             tax_year, states=list(final_snapshot.state_income_tax.keys())
@@ -773,6 +782,20 @@ def package_to_markdown(package: dict[str, Any]) -> str:
     lines.append(f"- Latest paystub file: `{package['latest_paystub_file']}`")
     lines.append(f"- Ready to file: `{package['ready_to_file']}`")
     lines.append("")
+    
+    if "filing_safety_check" in package:
+        safety = package["filing_safety_check"]
+        status = "PASSED" if safety["passed"] else "FAILED"
+        lines.append(f"## Filing Safety Check: {status}")
+        if safety["errors"]:
+            lines.append("### Blocking Errors")
+            for err in safety["errors"]:
+                lines.append(f"- [BLOCK] {err}")
+        if safety["warnings"]:
+            lines.append("### Warnings")
+            for warn in safety["warnings"]:
+                lines.append(f"- [WARN] {warn}")
+        lines.append("")
 
     lines.append("## Extracted Final YTD Values")
     lines.append(f"- Gross pay: {extracted['gross_pay']['ytd']}")

@@ -1,5 +1,16 @@
 # Paystub Analyzer (W-2 Cross-Check)
 
+> [!WARNING]
+> **Status: Alpha / Personal Workflow**
+> This tool is currently in an experimental state designed for a specific personal workflow. It is **not** production-ready software.
+>
+> **DISCLAIMER: NOT TAX ADVICE**
+> This software is for educational and data extraction purposes only. It does **not** provide tax advice.
+> *   **You are responsible for the accuracy of your own tax returns.**
+> *   **Always treat your W-2 as the source of truth.**
+> *   The extracted data may contain errors due to OCR imperfections or heuristic failures.
+
+
 This project extracts tax evidence from ADP-style paystubs, cross-verifies it against W-2 values, and generates a filing packet.
 
 Default folders:

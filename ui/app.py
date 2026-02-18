@@ -41,230 +41,157 @@ def apply_theme() -> None:
     st.markdown(
         """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+/* Import modern fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  --bg-0: #f8f7f3;
-  --bg-1: #fff9f0;
-  --accent-1: #0f5d75;
-  --accent-2: #d97324;
-  --card: rgba(255,255,255,0.8);
-  --ink: #1f2a37;
+  /* Core Palette - High Contrast Light Theme */
+  --bg-core: #ffffff;
+  --bg-surface: #f8f9fa;
+  --bg-subtle: #e9ecef;
+  
+  --text-primary: #1a1a1a;
+  --text-secondary: #4a4a4a;
+  --text-tertiary: #6c757d;
+  
+  --brand-primary: #0f5d75;
+  --brand-primary-hover: #0b4a5d;
+  --brand-secondary: #d97324;
+  
+  --border-subtle: #dee2e6;
+  --border-strong: #ced4da;
 }
 
-html, body, [class*="stApp"] {
-  font-family: 'Space Grotesk', sans-serif;
-  color: var(--ink);
-  background: radial-gradient(circle at 8% 5%, #ffe8d4 0%, rgba(255, 232, 212, 0) 38%),
-              radial-gradient(circle at 92% 20%, #dbeffd 0%, rgba(219, 239, 253, 0) 42%),
-              linear-gradient(160deg, var(--bg-0), var(--bg-1));
+/* Global resets for Streamlit containers */
+[data-testid="stAppViewContainer"] {
+  background-color: var(--bg-core);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
 }
 
-h1, h2, h3 {
+[data-testid="stHeader"] {
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+[data-testid="stSidebar"] {
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+}
+
+/* Typographic enhancements */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid rgba(15, 93, 117, 0.18);
-  border-radius: 14px;
-  padding: 0.8rem 1rem;
-  box-shadow: 0 6px 20px rgba(15, 93, 117, 0.08);
+div[data-testid="stMarkdownContainer"] p, 
+div[data-testid="stMarkdownContainer"] li {
+  color: var(--text-primary);
+  font-size: 1rem;
+  line-height: 1.6;
 }
 
-.card .label {
-  font-size: 0.85rem;
+.stCaption {
+  color: var(--text-tertiary) !important;
+}
+
+/* Custom Card Component */
+.metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  margin-bottom: 0.5rem;
+}
+
+.metric-card .label {
+  font-size: 0.75rem;
   text-transform: uppercase;
-  color: #456;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  font-weight: 600;
   margin-bottom: 0.25rem;
 }
 
-.card .value {
-  font-size: 1.5rem;
+.metric-card .value {
+  font-size: 1.25rem;
   font-weight: 700;
+  color: var(--brand-primary);
+  font-family: 'JetBrains Mono', monospace;
 }
 
-.code-font {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 0.88rem;
+/* UI Elements Overrides */
+div[data-baseweb="select"] > div,
+div[data-baseweb="input"] > div {
+  background-color: var(--bg-core) !important;
+  border-color: var(--border-strong) !important;
+  color: var(--text-primary) !important;
 }
 
+div[data-baseweb="input"] input,
+div[data-baseweb="select"] span,
+div[data-baseweb="base-input"] input {
+  color: var(--text-primary) !important;
+  -webkit-text-fill-color: var(--text-primary) !important;
+  caret-color: var(--brand-primary) !important;
+}
+
+/* Ensure labels are readable */
+label[data-baseweb="checkbox"] span,
+label[data-baseweb="radio"] span,
+.stTextInput label,
+.stNumberInput label,
+.stSelectbox label,
+.stFileUploader label {
+  color: var(--text-primary) !important;
+}
+
+/* Fix for disabled inputs if needed */
+div[data-baseweb="input"] input:disabled {
+  color: var(--text-tertiary) !important;
+  -webkit-text-fill-color: var(--text-tertiary) !important;
+}
+
+button[kind="primary"] {
+  background-color: var(--brand-primary) !important;
+  color: #ffffff !important;
+  border: none !important;
+  transition: background-color 0.15s ease-in-out;
+}
+
+button[kind="primary"]:hover {
+  background-color: var(--brand-primary-hover) !important;
+}
+
+button[kind="secondary"] {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-strong) !important;
+}
+
+/* Status Pills */
 .status-pill {
-  display: inline-block;
-  border-radius: 999px;
-  padding: 0.08rem 0.55rem;
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
   font-weight: 600;
+  text-transform: uppercase;
 }
+.status-match { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+.status-mismatch { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.status-review { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
+.status-missing { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
 
-.status-match { background: #dcfce7; color: #166534; }
-.status-mismatch { background: #fee2e2; color: #991b1b; }
-.status-review { background: #fef3c7; color: #92400e; }
-.status-missing { background: #e5e7eb; color: #374151; }
-
-.stButton > button,
-.stFormSubmitButton > button,
-.stDownloadButton > button {
-  background: linear-gradient(135deg, #0f5d75, #0c7a66) !important;
-  color: #ffffff !important;
-  border: 1px solid #0f5d75 !important;
-  font-weight: 700 !important;
-}
-
-.stButton > button:hover,
-.stFormSubmitButton > button:hover,
-.stDownloadButton > button:hover {
-  background: linear-gradient(135deg, #0b4a5d, #0a6352) !important;
-  color: #ffffff !important;
-}
-
-.stButton > button *,
-.stFormSubmitButton > button *,
-.stDownloadButton > button * {
-  color: #ffffff !important;
-}
-
-.stRadio > label,
-.stRadio > label p,
-.stRadio [role="radiogroup"] label,
-.stRadio [role="radiogroup"] label p,
-.stRadio [data-testid="stMarkdownContainer"] p {
-  color: #1f2a37 !important;
-  opacity: 1 !important;
-}
-
-.stRadio [role="radiogroup"] > label {
-  background: rgba(255, 255, 255, 0.75);
-  border: 1px solid rgba(15, 93, 117, 0.22);
-  border-radius: 10px;
-  padding: 0.25rem 0.6rem;
-}
-
-.stRadio [role="radiogroup"] [aria-checked="true"] {
-  background: rgba(15, 93, 117, 0.18) !important;
-  border-radius: 10px;
-}
-
-.stFileUploader [data-testid="stFileUploaderDropzone"] {
-  background: rgba(255, 255, 255, 0.82) !important;
-  border: 1px dashed rgba(15, 93, 117, 0.45) !important;
-}
-
-.stFileUploader [data-testid="stFileUploaderDropzone"] *,
-.stFileUploader [data-testid="stFileUploaderDropzoneInstructions"],
-.stFileUploader [data-testid="stFileUploaderDropzoneInstructions"] * {
-  color: #1f2a37 !important;
-}
-
-.stFileUploader button {
-  background: linear-gradient(135deg, #0f5d75, #0c7a66) !important;
-  color: #ffffff !important;
-  border: 1px solid #0f5d75 !important;
-  font-weight: 700 !important;
-}
-
-.stFileUploader button * {
-  color: #ffffff !important;
-}
-
-.stFileUploader [data-testid="stFileUploaderFile"] {
-  background: rgba(255, 245, 230, 0.95) !important;
-  border: 1px solid rgba(15, 93, 117, 0.25) !important;
-}
-
-.stFileUploader [data-testid="stFileUploaderFileName"],
-.stFileUploader [data-testid="stFileUploaderFileData"] {
-  color: #1f2a37 !important;
-  font-weight: 600 !important;
-}
-
-.notice {
-  border-radius: 10px;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid transparent;
-  margin: 0.25rem 0 0.75rem 0;
-  font-weight: 600;
-}
-
-.notice-success {
-  background: #e9f9ef;
-  border-color: #2f9e5c;
-  color: #0f5132;
-}
-
-.stTextInput > label,
-.stSelectbox > label,
-.stFileUploader > label,
-.stSlider > label,
-.stNumberInput > label,
-.stCheckbox > label,
-.stRadio > label,
-.stCaption,
-[data-testid="stMarkdownContainer"] p {
-  color: #1f2a37 !important;
-}
-
-.stNumberInput label p,
-.stNumberInput label span,
-.stTextInput label p,
-.stCheckbox label span {
-  color: #1f2a37 !important;
-  opacity: 1 !important;
-}
-
-.stNumberInput [data-baseweb="input"],
-.stTextInput [data-baseweb="input"] {
-  background: rgba(255, 255, 255, 0.9) !important;
-  border: 1px solid rgba(15, 93, 117, 0.25) !important;
-}
-
-.stNumberInput [data-baseweb="input"] input,
-.stTextInput [data-baseweb="input"] input {
-  color: #1f2a37 !important;
-}
-
-section[data-testid="stSidebar"] {
-  background: linear-gradient(
-    180deg,
-    rgba(255, 249, 240, 0.96) 0%,
-    rgba(247, 243, 234, 0.96) 100%
-  ) !important;
-  border-right: 1px solid rgba(15, 93, 117, 0.2) !important;
-}
-
-section[data-testid="stSidebar"] h1,
-section[data-testid="stSidebar"] h2,
-section[data-testid="stSidebar"] h3,
-section[data-testid="stSidebar"] label,
-section[data-testid="stSidebar"] label p,
-section[data-testid="stSidebar"] label span,
-section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span,
-section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
-  color: #1f2a37 !important;
-  opacity: 1 !important;
-}
-
-section[data-testid="stSidebar"] .stTextInput [data-baseweb="input"],
-section[data-testid="stSidebar"] .stNumberInput [data-baseweb="input"] {
-  background: rgba(255, 255, 255, 0.92) !important;
-  border: 1px solid rgba(15, 93, 117, 0.3) !important;
-}
-
-section[data-testid="stSidebar"] .stTextInput input,
-section[data-testid="stSidebar"] .stNumberInput input {
-  color: #1f2a37 !important;
-}
-
-section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div {
-  background: rgba(255, 255, 255, 0.92) !important;
-  border: 1px solid rgba(15, 93, 117, 0.3) !important;
-}
-
-section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] *,
-section[data-testid="stSidebar"] [data-testid="stSlider"] * {
-  color: #1f2a37 !important;
+/* Code blocks */
+code {
+  color: var(--brand-primary);
+  background: var(--bg-subtle);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
 }
 </style>
         """,
@@ -299,7 +226,7 @@ def reset_session_if_schema_changed() -> None:
 def metric_card(label: str, value: str) -> None:
     st.markdown(
         f"""
-<div class="card">
+<div class="metric-card">
   <div class="label">{label}</div>
   <div class="value">{value}</div>
 </div>
