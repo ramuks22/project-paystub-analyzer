@@ -139,7 +139,7 @@ def main() -> None:
         )
 
     try:
-        package = build_tax_filing_package(
+        composite_result = build_tax_filing_package(
             tax_year=args.year,
             snapshots=snapshots,
             tolerance=args.tolerance,
@@ -148,8 +148,12 @@ def main() -> None:
     except Exception as e:
         sys.exit(f"Error building package: {e}")
 
+    package = composite_result["report"]
+    ledger = composite_result["ledger"]
+    meta = composite_result["meta"]
+
     # Check filing safety
-    safety = package.get("filing_safety_check", {})
+    safety = meta.get("filing_safety", {})
     safety_passed = safety.get("passed", False)
 
     if not safety_passed:
@@ -166,13 +170,13 @@ def main() -> None:
         else:
             print("WARNING: Generating package despite failures due to --force flag.")
 
-    write_ledger_csv(ledger_csv_out, package["ledger"])
+    write_ledger_csv(ledger_csv_out, ledger)
     write_json(package_json_out, package)
     write_markdown(package_md_out, package_to_markdown(package))
 
-    extracted = package["extracted"]
-    print(f"Analyzed paystubs: raw={package['paystub_count_raw']} canonical={package['paystub_count_canonical']}")
-    print(f"Latest paystub date: {package['latest_pay_date']}")
+    extracted = meta["extracted"]
+    print(f"Analyzed paystubs: raw={meta['paystub_count_raw']} canonical={meta['paystub_count_canonical']}")
+    print(f"Latest paystub date: {meta['latest_pay_date']}")
     print(
         f"Federal income tax YTD: {format_money(Decimal(str(extracted['federal_income_tax']['ytd'])) if extracted['federal_income_tax']['ytd'] is not None else None)}"
     )
@@ -181,8 +185,10 @@ def main() -> None:
         if row["ytd"] is not None:
             state_sum += Decimal(str(row["ytd"]))
     print(f"State income tax YTD total: {format_money(state_sum)}")
-    print(f"Authenticity score: {package['authenticity_assessment']['score']}/100")
-    print(f"Ready to file: {package['ready_to_file']}")
+    print(f"Authenticity score: {meta['authenticity_score']}/100")
+
+    household = package["household_summary"]
+    print(f"Ready to file: {household['ready_to_file']}")
     print(f"Ledger CSV: {ledger_csv_out}")
     print(f"Package JSON: {package_json_out}")
     print(f"Package Markdown: {package_md_out}")

@@ -67,3 +67,77 @@ jobs:
           *.json
           *.csv
           *.md
+
+  docker-hardening:
+    name: Docker Hardening (Build, Security, Smoke)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dev Tools (for fixture generation)
+        run: pip install reportlab
+
+      - name: Build Docker Image
+        run: docker build -t paystub-analyzer:latest .
+
+      # ----------------------------------------------------------------
+      # Security Regression Check (.dockerignore)
+      # ----------------------------------------------------------------
+      - name: Verify .dockerignore (Forbidden Paths)
+        run: |
+          # Verify sensitive paths are NOT in the image
+          # We use `entrypoint sh` to inspect the file system
+          docker run --rm --entrypoint sh paystub-analyzer:latest -c "
+            FOUND=0
+            for path in pay_statements w2_forms private_notes reports tests; do
+              if [ -e /app/\$path ]; then
+                echo \"CRITICAL: Forbidden path found in image: /app/\$path\"
+                FOUND=1
+              fi
+            done
+            exit \$FOUND
+          "
+
+      # ----------------------------------------------------------------
+      # Smoke Test (Real execution)
+      # ----------------------------------------------------------------
+      - name: Generate Smoke Fixture
+        run: python scripts/generate_smoke_fixture.py smoke_data/paystubs
+
+      - name: Run Smoke Test
+        run: |
+          mkdir -p smoke_data/output
+
+          # Run container against fixture
+          docker run --rm \
+            -v $(pwd)/smoke_data:/data \
+            paystub-analyzer:latest \
+            paystub-annual \
+            --year 2025 \
+            --paystubs-dir /data/paystubs \
+            --package-json-out /data/output/package.json \
+            --render-scale 2.0
+
+      - name: Validate Smoke Output
+        run: |
+          # Check file existence
+          if [ ! -f smoke_data/output/package.json ]; then
+            echo "Error: Output file not produced."
+            exit 1
+          fi
+
+          # Check content validity (simple grep for now, or python script)
+          # Ensuring schema_version 0.2.0 is present
+          if ! grep -q '"schema_version": "0.2.0"' smoke_data/output/package.json; then
+             echo "Error: Schema version mismatch or file empty."
+             cat smoke_data/output/package.json
+             exit 1
+          fi
+
+          echo "Smoke test passed. Output generated and validated."

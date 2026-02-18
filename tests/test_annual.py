@@ -47,13 +47,13 @@ class AnnualTests(unittest.TestCase):
             "box_6_medicare_tax_withheld": 10.00,
             "state_boxes": [{"state": "VA", "box_17_state_income_tax": 40.00}],
         }
-        package = build_tax_filing_package(
+        result = build_tax_filing_package(
             tax_year=2025,
             snapshots=[s1, s2],
             tolerance=Decimal("0.01"),
             w2_data=w2,
         )
-        self.assertTrue(package["ready_to_file"])
+        self.assertTrue(result["report"]["household_summary"]["ready_to_file"])
 
     def test_repairs_opening_state_ytd_outlier(self) -> None:
         s1 = PaystubSnapshot(
@@ -85,16 +85,18 @@ class AnnualTests(unittest.TestCase):
             normalized_lines=[],
         )
 
-        package = build_tax_filing_package(
+        result = build_tax_filing_package(
             tax_year=2025,
             snapshots=[s1, s2],
             tolerance=Decimal("0.01"),
             w2_data=None,
         )
-        first_row = next(row for row in package["ledger"] if row["pay_date"] == "2025-04-15")
+        first_row = next(row for row in result["ledger"] if row["pay_date"] == "2025-04-15")
         self.assertEqual(first_row["state_tax_ytd_by_state"]["AZ"], 84.61)
         self.assertIn("AZ:", first_row["ytd_verification"])
-        self.assertTrue(any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"]))
+        self.assertTrue(
+            any(issue["code"] == "state_ytd_outlier_corrected" for issue in result["meta"]["consistency_issues"])
+        )
 
     def test_repairs_midyear_state_ytd_spike_and_this_period(self) -> None:
         s1 = PaystubSnapshot(
@@ -140,19 +142,21 @@ class AnnualTests(unittest.TestCase):
             normalized_lines=[],
         )
 
-        package = build_tax_filing_package(
+        result = build_tax_filing_package(
             tax_year=2025,
             snapshots=[s1, s2, s3],
             tolerance=Decimal("0.01"),
             w2_data=None,
         )
-        target_row = next(row for row in package["ledger"] if row["pay_date"] == "2025-11-28")
+        target_row = next(row for row in result["ledger"] if row["pay_date"] == "2025-11-28")
         self.assertEqual(target_row["state_tax_ytd_by_state"]["AZ"], 498.26)
         self.assertIsNone(target_row["state_tax_this_period_by_state"]["AZ"])
         self.assertEqual(target_row["state_tax_this_period_total"], 297.35)
         self.assertEqual(target_row["state_tax_ytd_total"], 4629.92)
         self.assertIn("AZ:", target_row["ytd_verification"])
-        self.assertTrue(any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"]))
+        self.assertTrue(
+            any(issue["code"] == "state_ytd_outlier_corrected" for issue in result["meta"]["consistency_issues"])
+        )
 
 
 if __name__ == "__main__":

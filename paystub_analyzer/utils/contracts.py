@@ -18,7 +18,7 @@ def load_schema(schema_name: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Schema not found: {schema_name}")
 
     with open(schema_path, "r") as f:
-        return json.load(f)
+        return dict(json.load(f))
 
 
 def validate_output(data: Dict[str, Any], schema_name: str, mode: str = "FILING") -> None:

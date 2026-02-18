@@ -28,21 +28,21 @@ def test_build_package_success(mocker):
 
     # Mock extract_paystub_snapshot is NOT needed because we pass snapshots directly to build_tax_filing_package
 
-    package = build_tax_filing_package(tax_year=2025, snapshots=snapshots, tolerance=Decimal("0.05"), w2_data=None)
+    result = build_tax_filing_package(tax_year=2025, snapshots=snapshots, tolerance=Decimal("0.05"), w2_data=None)
 
-    assert package["tax_year"] == 2025
-    assert package["paystub_count_raw"] == 2
-    assert package["latest_pay_date"] == "2025-01-31"
-    assert package["extracted"]["gross_pay"]["ytd"] == Decimal("10000.00")
-    assert package["schema_version"] == "1.0.0"
+    # Check meta for internal details
+    meta = result["meta"]
+    assert meta["tax_year"] == 2025
+    assert meta["paystub_count_raw"] == 2
+    assert meta["latest_pay_date"] == "2025-01-31"
+    assert meta["extracted"]["gross_pay"]["ytd"] == Decimal("10000.00")
 
-    # Safety check should fail because extracted fields are present but we didn't mock everything perfectly?
-    # Actually, create_mock_snapshot populates all required fields, so it should pass if we check valid fields.
-    # But wait, annual.py might check consistency.
+    # Check public report for schema
+    report = result["report"]
+    assert report["schema_version"] == "0.2.0"
 
-    safety = package.get("filing_safety_check", {})
-    # In this simple mock, we expect it might pass or fail depending on strict rules,
-    # but we mostly care that structure is correct
+    # Safety check
+    safety = meta.get("filing_safety", {})
     assert "passed" in safety
 
 
@@ -55,10 +55,6 @@ def test_build_package_with_w2_mismatch(mocker):
         "box_2_federal_income_tax_withheld": Decimal("1100.00"),  # Mismatch (Strict)
         "box_4_social_security_tax_withheld": Decimal("620.00"),
         "box_6_medicare_tax_withheld": Decimal("145.00"),
-        # k401 is generally not on W-2 directly in core boxes, maybe box 12?
-        # But annual.py doesn't compare it strictly?
-        # Check w2.py logic: it compares fed, ss, medicare, and gross (info).
-        # State taxes are in nested list.
         "state_boxes": [
             {
                 "state": "CA",
@@ -68,8 +64,8 @@ def test_build_package_with_w2_mismatch(mocker):
         ],
     }
 
-    package = build_tax_filing_package(tax_year=2025, snapshots=[snapshot], tolerance=Decimal("0.05"), w2_data=w2_data)
+    result = build_tax_filing_package(tax_year=2025, snapshots=[snapshot], tolerance=Decimal("0.05"), w2_data=w2_data)
 
-    safety = package["filing_safety_check"]
+    safety = result["meta"]["filing_safety"]
     assert safety["passed"] is False
     assert any("Mismatch" in err for err in safety["errors"])

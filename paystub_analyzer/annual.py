@@ -736,6 +736,7 @@ def build_tax_filing_package(
 
     # New Filing Mode Safety Check
     from paystub_analyzer.filing_rules import validate_filing_safety
+    from paystub_analyzer.utils.contracts import validate_output
 
     filing_safety = validate_filing_safety(
         extracted_data=extracted_summary(final_snapshot),
@@ -746,101 +747,82 @@ def build_tax_filing_package(
 
     ready_to_file = filing_safety.passed and bool(w2_data)
 
-    payload: dict[str, Any] = {
-        "schema_version": "1.0.0",
-        "tax_year": tax_year,
-        "paystub_count_raw": len(snapshots),
-        "paystub_count_canonical": len(canonical_snapshots),
-        "latest_paystub_file": final_snapshot.file,
-        "latest_pay_date": final_snapshot.pay_date,
-        "extracted": extracted_summary(final_snapshot),
-        "ledger": ledger,
-        "consistency_issues": [issue.__dict__ for issue in issues],
-        "authenticity_assessment": assessment,
-        "filing_safety_check": filing_safety._asdict(),
-        "ready_to_file": ready_to_file,
-        "filing_checklist": filing_checklist(tax_year, states=list(final_snapshot.state_income_tax.keys())),
-        "comparisons": comparisons,
-        "comparison_summary": comparison_summary,
+    # Convert to v0.2.0 Schema (Integer Cents)
+    extracted = extracted_summary(final_snapshot)
+
+    # Helper to convert decimal/float to cents
+    def to_cents(x: dict[str, Any] | None) -> int:
+        if x and x.get("ytd") is not None:
+            return int(round(x["ytd"] * 100))
+        return 0
+
+    primary_filer = {
+        "id": "primary",
+        "role": "PRIMARY",
+        "gross_pay_cents": to_cents(extracted["gross_pay"]),
+        "fed_tax_cents": to_cents(extracted["federal_income_tax"]),
+        "state_tax_by_state_cents": {k: to_cents(v) for k, v in extracted["state_income_tax"].items()},
+        "status": "MATCH" if ready_to_file else "REVIEW_NEEDED",  # Simplified status logic for now
+        "audit_flags": [err for err in filing_safety.errors] + [warn for warn in filing_safety.warnings],
     }
-    if w2_data is not None:
-        payload["w2_input"] = w2_data
-    return payload
+
+    # In v0.2.0, single filer means household totals == primary totals
+    public_report: dict[str, Any] = {
+        "schema_version": "0.2.0",
+        "household_summary": {
+            "total_gross_pay_cents": primary_filer["gross_pay_cents"],
+            "total_fed_tax_cents": primary_filer["fed_tax_cents"],
+            "ready_to_file": ready_to_file,
+        },
+        "filers": [primary_filer],
+    }
+
+    # Validate Contract
+    validate_output(public_report, "annual_summary", mode="FILING")
+
+    # Return composite internal package
+    return {
+        "report": public_report,
+        "ledger": ledger,
+        "meta": {
+            "tax_year": tax_year,
+            "paystub_count_raw": len(snapshots),
+            "paystub_count_canonical": len(canonical_snapshots),
+            "latest_pay_date": final_snapshot.pay_date,
+            "latest_paystub_file": final_snapshot.file,
+            "extracted": extracted,
+            "authenticity_score": assessment["score"],
+            "filing_safety": filing_safety._asdict(),
+            "consistency_issues": [issue.__dict__ for issue in issues],
+        },
+    }
 
 
 def package_to_markdown(package: dict[str, Any]) -> str:
-    extracted = package["extracted"]
+    household = package["household_summary"]
+    primary = package["filers"][0]
+
     lines: list[str] = []
 
-    lines.append("# Tax Filing Packet")
+    lines.append("# Tax Filing Packet (v0.2.0)")
     lines.append("")
-    lines.append(f"- Tax year: {package['tax_year']}")
-    lines.append(
-        f"- Paystubs analyzed: raw={package['paystub_count_raw']} canonical={package['paystub_count_canonical']}"
-    )
-    lines.append(f"- Latest paystub date: {package['latest_pay_date']}")
-    lines.append(f"- Latest paystub file: `{package['latest_paystub_file']}`")
-    lines.append(f"- Ready to file: `{package['ready_to_file']}`")
+    lines.append(f"- Schema Version: {package['schema_version']}")
+    lines.append(f"- Ready to file: `{household['ready_to_file']}`")
     lines.append("")
 
-    if "filing_safety_check" in package:
-        safety = package["filing_safety_check"]
-        status = "PASSED" if safety["passed"] else "FAILED"
-        lines.append(f"## Filing Safety Check: {status}")
-        if safety["errors"]:
-            lines.append("### Blocking Errors")
-            for err in safety["errors"]:
-                lines.append(f"- [BLOCK] {err}")
-        if safety["warnings"]:
-            lines.append("### Warnings")
-            for warn in safety["warnings"]:
-                lines.append(f"- [WARN] {warn}")
-        lines.append("")
-
-    lines.append("## Extracted Final YTD Values")
-    lines.append(f"- Gross pay: {extracted['gross_pay']['ytd']}")
-    lines.append(f"- Federal income tax: {extracted['federal_income_tax']['ytd']}")
-    lines.append(f"- Social Security tax: {extracted['social_security_tax']['ytd']}")
-    lines.append(f"- Medicare tax: {extracted['medicare_tax']['ytd']}")
-    lines.append(f"- 401(k) contribution: {extracted['k401_contrib']['ytd']}")
-    for state, row in sorted(extracted.get("state_income_tax", {}).items()):
-        lines.append(f"- {state} state income tax: {row['ytd']}")
+    lines.append("## Household Summary")
+    lines.append(f"- Total Gross Pay: ${household['total_gross_pay_cents'] / 100:,.2f}")
+    lines.append(f"- Total Fed Tax: ${household['total_fed_tax_cents'] / 100:,.2f}")
     lines.append("")
 
-    lines.append("## Authenticity Assessment")
-    assessment = package["authenticity_assessment"]
-    lines.append(f"- Score: {assessment['score']}/100")
-    lines.append(f"- Verdict: {assessment['verdict']}")
-    lines.append(f"- Disclaimer: {assessment['disclaimer']}")
-    lines.append("")
+    lines.append("## Primary Filer")
+    lines.append(f"- Gross Pay: ${primary['gross_pay_cents'] / 100:,.2f}")
+    lines.append(f"- Fed Tax: ${primary['fed_tax_cents'] / 100:,.2f}")
+    lines.append(f"- Status: {primary['status']}")
 
-    if package.get("comparison_summary"):
-        lines.append("## W-2 Comparison Summary")
-        summary = package["comparison_summary"]
-        lines.append(f"- match: {summary.get('match', 0)}")
-        lines.append(f"- mismatch: {summary.get('mismatch', 0)}")
-        lines.append(f"- review_needed: {summary.get('review_needed', 0)}")
-        lines.append(f"- missing_paystub_value: {summary.get('missing_paystub_value', 0)}")
-        lines.append(f"- missing_w2_value: {summary.get('missing_w2_value', 0)}")
-        lines.append("")
+    if primary["audit_flags"]:
+        lines.append("### Audit Flags")
+        for flag in primary["audit_flags"]:
+            lines.append(f"- {flag}")
 
-        lines.append("## W-2 Comparison Details")
-        for row in package.get("comparisons", []):
-            lines.append(
-                f"- {row['field']}: paystub={row['paystub']} w2={row['w2']} diff={row['difference']} status={row['status']}"
-            )
-        lines.append("")
-
-    lines.append("## Consistency Issues")
-    if not package["consistency_issues"]:
-        lines.append("- none")
-    else:
-        for issue in package["consistency_issues"]:
-            lines.append(f"- [{issue['severity']}] {issue['code']}: {issue['message']}")
-    lines.append("")
-
-    lines.append("## Filing Checklist")
-    for item in package["filing_checklist"]:
-        lines.append(f"- {item['item']}: {item['detail']}")
-
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)

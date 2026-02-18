@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr
+          python -m pip install --upgrade pip
+          pip install build
+          pip install -e ".[dev]"
+
+      # ----------------------------------------------------------------
+      # Quality Gates (Must pass before release)
+      # ----------------------------------------------------------------
+      - name: Security & Hygiene (Pre-commit)
+        run: pre-commit run --all-files
+
+      - name: Type Check (mypy)
+        run: mypy paystub_analyzer
+
+      - name: Run Tests (Unit, Integration, Contracts)
+        run: |
+          pytest -v
+          pytest tests/test_contracts.py
+
+      # ----------------------------------------------------------------
+      # Version Verification
+      # ----------------------------------------------------------------
+      - name: Verify Version Match
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/}
+          # Normalize tag (v0.1.0 -> 0.1.0)
+          NORMALIZED_TAG=${TAG_VERSION#v}
+
+          # Get pyproject version (using a simple grep or python script)
+          PROJECT_VERSION=$(grep -m 1 'version = ' pyproject.toml | cut -d '"' -f 2)
+
+          echo "Tag: $NORMALIZED_TAG"
+          echo "Project: $PROJECT_VERSION"
+
+          if [ "$NORMALIZED_TAG" != "$PROJECT_VERSION" ]; then
+            echo "Error: Tag version ($NORMALIZED_TAG) does not match pyproject.toml version ($PROJECT_VERSION)"
+            exit 1
+          fi
+
+      # ----------------------------------------------------------------
+      # Build & Publish
+      # ----------------------------------------------------------------
+      - name: Extract Release Notes
+        id: extract_notes
+        run: |
+          NOTES=$(python scripts/extract_release_notes.py ${GITHUB_REF#refs/tags/})
+          if [ -z "$NOTES" ]; then
+            echo "Error: Release notes are empty."
+            exit 1
+          fi
+          # GitHub Actions multiline output magic
+          echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+          echo "$NOTES" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Build Package
+        run: python -m build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body: ${{ env.RELEASE_NOTES }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

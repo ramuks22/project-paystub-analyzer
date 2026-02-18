@@ -174,16 +174,18 @@ def main() -> None:
     latest_file, latest_date = select_latest_paystub(paystub_files)
     snapshot = extract_paystub_snapshot(latest_file, render_scale=args.render_scale)
 
+    from paystub_analyzer.utils.contracts import validate_output
+
     extracted = snapshot_to_payload(snapshot)
-    payload: dict[str, Any] = {
-        "schema_version": "1.0.0",
-        "tax_year": args.year if args.year is not None else latest_date.year,
-        "latest_paystub_file": str(latest_file),
-        "latest_pay_date": latest_date.isoformat(),
-        "extracted": extracted,
-        "comparisons": [],
-        "comparison_summary": {},
+
+    # Minimal compliant payload for v0.2.0 W-2 schema
+    contract_payload: dict[str, Any] = {
+        "schema_version": "0.2.0",
+        "match_status": "REVIEW_NEEDED",  # Default for now
+        "discrepancies": [],
     }
+
+    validate_output(contract_payload, "w2_comparison", mode="REVIEW")  # Warn only for CLI tool
 
     if args.w2_json and args.w2_pdf:
         raise SystemExit("Use either --w2-json or --w2-pdf, not both.")
@@ -201,12 +203,23 @@ def main() -> None:
 
     if w2_data:
         comparisons, summary = compare_snapshot_to_w2(snapshot, w2_data, args.tolerance)
-        payload["w2_input"] = w2_data
-        payload["comparisons"] = comparisons
-        payload["comparison_summary"] = summary
+        contract_payload["w2_input"] = w2_data
+        contract_payload["comparisons"] = comparisons
+        contract_payload["comparison_summary"] = summary
 
-    write_json(args.json_out, payload)
-    write_text(args.report_out, report_markdown(payload))
+    write_json(args.json_out, contract_payload)
+
+    # Construct a legacy-compatible payload for the markdown report
+    report_payload = {
+        "tax_year": args.year if args.year is not None else latest_date.year,
+        "latest_paystub_file": str(latest_file),
+        "latest_pay_date": latest_date.isoformat(),
+        "extracted": extracted,
+        "comparisons": contract_payload.get("comparisons", []),
+        "comparison_summary": contract_payload.get("comparison_summary", {}),
+    }
+
+    write_text(args.report_out, report_markdown(report_payload))
 
     print(f"Latest paystub used: {latest_file} ({latest_date.isoformat()})")
     print(f"Federal income tax YTD: {format_money(snapshot.federal_income_tax.ytd)}")

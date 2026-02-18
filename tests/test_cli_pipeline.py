@@ -57,9 +57,15 @@ def test_annual_cli_pipeline(mock_ocr_text, tmp_path, capsys):
     assert output_json.exists()
     data = json.loads(output_json.read_text(encoding="utf-8"))
 
-    assert data["tax_year"] == 2025
-    assert data["paystub_count_raw"] == 1
+    assert data["schema_version"] == "0.2.0"
+
     # Check values extracted via regex from mock_ocr_text
-    assert data["extracted"]["gross_pay"]["ytd"] == 60000.0
-    assert data["extracted"]["federal_income_tax"]["ytd"] == 9600.0
-    assert data["extracted"]["state_income_tax"]["VA"]["ytd"] == 2400.0
+    # 60,000.00 -> 6,000,000 cents
+    assert data["household_summary"]["total_gross_pay_cents"] == 6000000
+    # 9,600.00 -> 960,000 cents
+    assert data["household_summary"]["total_fed_tax_cents"] == 960000
+
+    # State tax needs digging into filers[0]
+    primary = data["filers"][0]
+    # 2,400.00 -> 240,000 cents
+    assert primary["state_tax_by_state_cents"]["VA"] == 240000
