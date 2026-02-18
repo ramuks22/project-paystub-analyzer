@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from paystub_analyzer.core import (
     AmountPair,
@@ -262,9 +262,7 @@ def verify_ytd_calculations(
             if prev_pair.ytd is None or curr_pair.ytd is None:
                 continue
             if curr_pair.ytd + tolerance < prev_pair.ytd:
-                note = (
-                    f"{label} YTD decreased {format_money(prev_pair.ytd)} -> {format_money(curr_pair.ytd)}"
-                )
+                note = f"{label} YTD decreased {format_money(prev_pair.ytd)} -> {format_money(curr_pair.ytd)}"
                 record_note(notes_by_file, snapshot.file, note)
                 issues.append(
                     ConsistencyIssue(
@@ -277,10 +275,7 @@ def verify_ytd_calculations(
                 continue
             expected_ytd = (prev_pair.ytd + curr_pair.this_period).quantize(Decimal("0.01"))
             if abs(curr_pair.ytd - expected_ytd) > tolerance:
-                note = (
-                    f"{label} parsed YTD {format_money(curr_pair.ytd)} vs calculated "
-                    f"{format_money(expected_ytd)}"
-                )
+                note = f"{label} parsed YTD {format_money(curr_pair.ytd)} vs calculated {format_money(expected_ytd)}"
                 record_note(notes_by_file, snapshot.file, note)
                 issues.append(
                     ConsistencyIssue(
@@ -295,16 +290,21 @@ def verify_ytd_calculations(
 
         states = sorted(set(prev_snapshot.state_income_tax.keys()) | set(snapshot.state_income_tax.keys()))
         for state in states:
-            prev_pair = prev_snapshot.state_income_tax.get(state)
-            curr_pair = snapshot.state_income_tax.get(state)
-            if prev_pair is None or curr_pair is None:
+            # Explicitly type as optional to satisfy mypy
+            prev_pair_opt: AmountPair | None = prev_snapshot.state_income_tax.get(state)
+            curr_pair_opt: AmountPair | None = snapshot.state_income_tax.get(state)
+
+            if prev_pair_opt is None or curr_pair_opt is None:
                 continue
-            if prev_pair.ytd is None or curr_pair.ytd is None:
+
+            # Now we know they are not None
+            prev_pair_val: AmountPair = prev_pair_opt
+            curr_pair_val: AmountPair = curr_pair_opt
+
+            if prev_pair_val.ytd is None or curr_pair_val.ytd is None:
                 continue
-            if curr_pair.ytd + tolerance < prev_pair.ytd:
-                note = (
-                    f"{state} state YTD decreased {format_money(prev_pair.ytd)} -> {format_money(curr_pair.ytd)}"
-                )
+            if curr_pair_val.ytd + tolerance < prev_pair_val.ytd:
+                note = f"{state} state YTD decreased {format_money(prev_pair_val.ytd)} -> {format_money(curr_pair_val.ytd)}"
                 record_note(notes_by_file, snapshot.file, note)
                 issues.append(
                     ConsistencyIssue(
@@ -313,13 +313,12 @@ def verify_ytd_calculations(
                         message=f"{state} YTD decreased on {snapshot.pay_date}.",
                     )
                 )
-            if curr_pair.this_period is None:
+            if curr_pair_val.this_period is None:
                 continue
-            expected_ytd = (prev_pair.ytd + curr_pair.this_period).quantize(Decimal("0.01"))
-            if abs(curr_pair.ytd - expected_ytd) > tolerance:
+            expected_ytd = (prev_pair_val.ytd + curr_pair_val.this_period).quantize(Decimal("0.01"))
+            if abs(curr_pair_val.ytd - expected_ytd) > tolerance:
                 note = (
-                    f"{state} parsed YTD {format_money(curr_pair.ytd)} vs calculated "
-                    f"{format_money(expected_ytd)}"
+                    f"{state} parsed YTD {format_money(curr_pair_val.ytd)} vs calculated {format_money(expected_ytd)}"
                 )
                 record_note(notes_by_file, snapshot.file, note)
                 issues.append(
@@ -328,7 +327,7 @@ def verify_ytd_calculations(
                         code="state_ytd_calc_mismatch",
                         message=(
                             f"{state} state YTD on {snapshot.pay_date} differs from calculated "
-                            f"({format_money(curr_pair.ytd)} vs {format_money(expected_ytd)})."
+                            f"({format_money(curr_pair_val.ytd)} vs {format_money(expected_ytd)})."
                         ),
                     )
                 )
@@ -353,7 +352,7 @@ def pair_attr(snapshot: PaystubSnapshot, key: str) -> AmountPair:
 def check_monotonic(
     snapshots: list[PaystubSnapshot],
     label: str,
-    getter,
+    getter: Callable[[PaystubSnapshot], Decimal | None],
     tolerance: Decimal,
     severity: str = "critical",
 ) -> list[ConsistencyIssue]:
@@ -721,8 +720,11 @@ def build_tax_filing_package(
         canonical_snapshots,
         verification_notes_by_file=combined_notes,
     )
-    issues = ytd_repair_issues + ytd_calc_issues + duplicate_issues + run_consistency_checks(
-        canonical_snapshots, tolerance=tolerance
+    issues = (
+        ytd_repair_issues
+        + ytd_calc_issues
+        + duplicate_issues
+        + run_consistency_checks(canonical_snapshots, tolerance=tolerance)
     )
 
     comparisons: list[dict[str, Any]] = []
@@ -731,10 +733,10 @@ def build_tax_filing_package(
         comparisons, comparison_summary = compare_snapshot_to_w2(final_snapshot, w2_data, tolerance)
 
     assessment = authenticity_assessment(issues, comparisons)
-    
+
     # New Filing Mode Safety Check
     from paystub_analyzer.filing_rules import validate_filing_safety
-    
+
     filing_safety = validate_filing_safety(
         extracted_data=extracted_summary(final_snapshot),
         comparisons=comparisons,
@@ -757,9 +759,7 @@ def build_tax_filing_package(
         "authenticity_assessment": assessment,
         "filing_safety_check": filing_safety._asdict(),
         "ready_to_file": ready_to_file,
-        "filing_checklist": filing_checklist(
-            tax_year, states=list(final_snapshot.state_income_tax.keys())
-        ),
+        "filing_checklist": filing_checklist(tax_year, states=list(final_snapshot.state_income_tax.keys())),
         "comparisons": comparisons,
         "comparison_summary": comparison_summary,
     }
@@ -782,7 +782,7 @@ def package_to_markdown(package: dict[str, Any]) -> str:
     lines.append(f"- Latest paystub file: `{package['latest_paystub_file']}`")
     lines.append(f"- Ready to file: `{package['ready_to_file']}`")
     lines.append("")
-    
+
     if "filing_safety_check" in package:
         safety = package["filing_safety_check"]
         status = "PASSED" if safety["passed"] else "FAILED"

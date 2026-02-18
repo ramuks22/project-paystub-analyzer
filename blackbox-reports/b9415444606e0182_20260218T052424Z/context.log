@@ -1,0 +1,14 @@
+BlackBox context log
+testClass=tests/test_integration.py
+testName=test_build_package_with_w2_mismatch
+testId=b9415444606e0182
+runId=a880e66d-6218-4fef-a142-c596fb538f13
+status=FAILED
+timestamp=2026-02-18T05:24:24Z
+durationMs=16
+
+context:
+- (none)
+
+steps:
+- (none)

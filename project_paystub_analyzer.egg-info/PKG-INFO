@@ -16,6 +16,12 @@ Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: pypdfium2>=5.4.0
 Requires-Dist: streamlit>=1.42.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-mock>=3.10; extra == "dev"
+Requires-Dist: mypy>=1.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: types-setuptools; extra == "dev"
 
 # Paystub Analyzer (W-2 Cross-Check)
 

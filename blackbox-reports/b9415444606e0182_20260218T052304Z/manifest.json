@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "testId": "b9415444606e0182",
+    "testName": "test_build_package_with_w2_mismatch",
+    "testClass": "tests/test_integration.py",
+    "status": "FAILED",
+    "timestamp": "2026-02-18T05:23:04Z",
+    "durationMs": 15,
+    "runId": "a253c685-1e1d-4fa5-a32e-99603a4fc198",
+    "framework": {
+      "name": "pytest",
+      "version": "8.0.0"
+    },
+    "runtime": {
+      "language": "python",
+      "version": "3.11.9",
+      "os": "Darwin",
+      "arch": "arm64"
+    }
+  },
+  "context": {},
+  "steps": [],
+  "exception": {
+    "type": "AssertionError",
+    "message": "assert False\n +  where False = any(<generator object test_build_package_with_w2_mismatch.<locals>.<genexpr> at 0x10b9031d0>)",
+    "stackTrace": "mocker = <pytest_mock.plugin.MockerFixture object at 0x10ba72b10>\n\n    @pytest.mark.integration\n    def test_build_package_with_w2_mismatch(mocker):\n        snapshot = create_mock_snapshot(\"stub.pdf\", \"2025-12-31\", Decimal(\"50000.00\"))\n    \n        w2_data = {\n            \"gross_pay\": Decimal(\"50000.00\"),\n            \"federal_income_tax\": Decimal(\"1100.00\"),  # Mismatch (Strict)\n            \"social_security_tax\": Decimal(\"620.00\"),\n            \"medicare_tax\": Decimal(\"145.00\"),\n            \"k401_contrib\": Decimal(\"500.00\"),\n            \"state_income_tax\": {\"CA\": Decimal(\"400.00\")},\n        }\n    \n        package = build_tax_filing_package(tax_year=2025, snapshots=[snapshot], tolerance=Decimal(\"0.05\"), w2_data=w2_data)\n    \n        safety = package[\"filing_safety_check\"]\n        assert safety[\"passed\"] is False\n>       assert any(\"Mismatch\" in err for err in safety[\"errors\"])\nE       assert False\nE        +  where False = any(<generator object test_build_package_with_w2_mismatch.<locals>.<genexpr> at 0x10b9031d0>)\n\ntests/test_integration.py:66: AssertionError"
+  },
+  "artifacts": {
+    "bundleDir": "b9415444606e0182_20260218T052304Z",
+    "logs": "context.log"
+  }
+}

@@ -162,7 +162,7 @@ Annual package includes:
 Run the Streamlit app:
 
 ```bash
-streamlit run ui/app.py
+paystub-ui
 ```
 
 UI features:

@@ -25,6 +25,15 @@ dependencies = [
     "streamlit>=1.42.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-mock>=3.10",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+    "types-setuptools",
+]
+
 [project.urls]
 Homepage = "https://github.com/ramuks22/project-paystub-analyzer"
 Repository = "https://github.com/ramuks22/project-paystub-analyzer"
@@ -39,6 +48,15 @@ paystub-ui = "paystub_analyzer.cli.ui:main"
 where = ["."]
 include = ["paystub_analyzer*"]
 namespaces = false
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+markers = [
+    "unit: Pure logic tests with no I/O or mocking of complex subsystems.",
+    "integration: Tests that mock external dependencies (OCR, PDF) to verify component interaction.",
+    "e2e: Full system tests running the CLI or main entry points.",
+]
 
 [tool.ruff]
 line-length = 120

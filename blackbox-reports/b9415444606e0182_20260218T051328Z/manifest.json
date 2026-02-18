@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "testId": "b9415444606e0182",
+    "testName": "test_build_package_with_w2_mismatch",
+    "testClass": "tests/test_integration.py",
+    "status": "FAILED",
+    "timestamp": "2026-02-18T05:13:28Z",
+    "durationMs": 12,
+    "runId": "c1f84cf9-5c84-4495-83ed-2b6fd2d1cf9d",
+    "framework": {
+      "name": "pytest",
+      "version": "8.0.0"
+    },
+    "runtime": {
+      "language": "python",
+      "version": "3.11.9",
+      "os": "Darwin",
+      "arch": "arm64"
+    }
+  },
+  "context": {},
+  "steps": [],
+  "exception": {
+    "type": "InvalidOperation",
+    "message": "[<class 'decimal.ConversionSyntax'>]",
+    "stackTrace": "mocker = <pytest_mock.plugin.MockerFixture object at 0x10bd909d0>\n\n    def test_build_package_with_w2_mismatch(mocker):\n        snapshot = create_mock_snapshot(\"stub.pdf\", \"2025-12-31\", Decimal(\"50000.00\"))\n    \n        w2_data = {\n            \"gross_pay\": Decimal(\"55000.00\"), # Mismatch\n            \"federal_income_tax\": Decimal(\"1000.00\"),\n            \"social_security_tax\": Decimal(\"620.00\"),\n            \"medicare_tax\": Decimal(\"145.00\"),\n            \"k401_contrib\": Decimal(\"500.00\"),\n            \"state_income_tax\": {\"CA\": Decimal(\"400.00\")}\n        }\n    \n>       package = build_tax_filing_package(\n            tax_year=2025,\n            snapshots=[snapshot],\n            tolerance=Decimal(\"0.05\"),\n            w2_data=w2_data\n        )\n\ntests/test_integration.py:63: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \npaystub_analyzer/annual.py:738: in build_tax_filing_package\n    filing_safety = validate_filing_safety(\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nextracted_data = {'federal_income_tax': {'evidence': 'line', 'this_period': 100.0, 'ytd': 1000.0}, 'gross_pay': {'evidence': 'line', 't...ine', 'this_period': 50.0, 'ytd': 500.0}, 'medicare_tax': {'evidence': 'line', 'this_period': 14.5, 'ytd': 145.0}, ...}\ncomparisons = [{'difference': None, 'field': 'federal_income_tax_withheld', 'paystub': 1000.0, 'status': 'missing_w2_value', ...}, {....}, {'difference': None, 'field': 'CA_state_income_tax_withheld', 'paystub': 400.0, 'status': 'missing_w2_value', ...}]\nconsistency_issues = []\ntolerance = Decimal('0.05')\n\n    def validate_filing_safety(\n        extracted_data: dict[str, Any],\n        comparisons: list[dict[str, Any]],\n        consistency_issues: list[dict[str, Any]],\n        tolerance: Decimal,\n    ) -> FilingCheckResult:\n        \"\"\"\n        Validates if the current data is safe for a 'Filing Mode' export.\n    \n        Rules:\n        1. BLOCKING: Missing required tax fields (Gross Pay, Fed Tax, SS Tax, Medicare Tax).\n        2. BLOCKING: Comparison mismatches > tolerance.\n        3. BLOCKING: Critical consistency codes (e.g. 'ytd_decrease').\n        4. NON-BLOCKING: Cosmetic/OCR warnings.\n        \"\"\"\n        errors = []\n        warnings = []\n    \n        # 1. Check required fields\n        required_fields = [\n            \"gross_pay\",\n            \"federal_income_tax\",\n            \"social_security_tax\",\n            \"medicare_tax\",\n        ]\n        extracted_values = extracted_data.get(\"extracted\", {})\n        # Handle flat or nested structure depending on where this is called from\n        # If called with the Annual Package 'extracted' dict directly:\n        if \"gross_pay\" in extracted_data:\n            extracted_values = extracted_data\n    \n        for field in required_fields:\n            val = extracted_values.get(field, {}).get(\"ytd\")\n            if val is None:\n                errors.append(f\"Missing required field: {field} (YTD is null)\")\n    \n        # 2. Check comparison mismatches\n        for comp in comparisons:\n            status = comp.get(\"status\")\n>           diff = abs(Decimal(str(comp.get(\"difference\", \"0.00\"))))\nE           decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]\n\npaystub_analyzer/filing_rules.py:57: InvalidOperation"
+  },
+  "artifacts": {
+    "bundleDir": "b9415444606e0182_20260218T051328Z",
+    "logs": "context.log"
+  }
+}

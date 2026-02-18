@@ -1,0 +1,14 @@
+BlackBox context log
+testClass=tests/test_e2e.py
+testName=test_annual_cli_pipeline
+testId=fde3402b24c4819d
+runId=4857b9b4-821c-4f1c-a61e-460a39e57384
+status=FAILED
+timestamp=2026-02-18T05:41:26Z
+durationMs=62
+
+context:
+- (none)
+
+steps:
+- (none)

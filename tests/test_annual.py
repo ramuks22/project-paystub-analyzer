@@ -1,5 +1,7 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
+
+import pytest
 
 from paystub_analyzer.annual import build_tax_filing_package, run_consistency_checks
 from paystub_analyzer.core import AmountPair, PaystubSnapshot
@@ -11,7 +13,9 @@ def pair(this_period: str | None, ytd: str | None) -> AmountPair:
     return AmountPair(this_value, ytd_value, "evidence")
 
 
-def snapshot(pay_date: str, gross: tuple[str | None, str | None], fed: tuple[str | None, str | None]) -> PaystubSnapshot:
+def snapshot(
+    pay_date: str, gross: tuple[str | None, str | None], fed: tuple[str | None, str | None]
+) -> PaystubSnapshot:
     return PaystubSnapshot(
         file=f"pay_statements/Pay Date {pay_date}.pdf",
         pay_date=pay_date,
@@ -25,6 +29,7 @@ def snapshot(pay_date: str, gross: tuple[str | None, str | None], fed: tuple[str
     )
 
 
+@pytest.mark.unit
 class AnnualTests(unittest.TestCase):
     def test_detects_ytd_decrease(self) -> None:
         s1 = snapshot("2025-01-15", gross=("100.00", "100.00"), fed=("20.00", "20.00"))
@@ -89,9 +94,7 @@ class AnnualTests(unittest.TestCase):
         first_row = next(row for row in package["ledger"] if row["pay_date"] == "2025-04-15")
         self.assertEqual(first_row["state_tax_ytd_by_state"]["AZ"], 84.61)
         self.assertIn("AZ:", first_row["ytd_verification"])
-        self.assertTrue(
-            any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"])
-        )
+        self.assertTrue(any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"]))
 
     def test_repairs_midyear_state_ytd_spike_and_this_period(self) -> None:
         s1 = PaystubSnapshot(
@@ -149,9 +152,7 @@ class AnnualTests(unittest.TestCase):
         self.assertEqual(target_row["state_tax_this_period_total"], 297.35)
         self.assertEqual(target_row["state_tax_ytd_total"], 4629.92)
         self.assertIn("AZ:", target_row["ytd_verification"])
-        self.assertTrue(
-            any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"])
-        )
+        self.assertTrue(any(issue["code"] == "state_ytd_outlier_corrected" for issue in package["consistency_issues"]))
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -28,7 +27,8 @@ from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
 def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        data: dict[str, Any] = json.load(handle)
+        return data
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -41,7 +41,7 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def pair_to_dict(pair) -> dict[str, Any]:
+def pair_to_dict(pair: Any) -> dict[str, Any]:
     return {
         "this_period": as_float(pair.this_period),
         "ytd": as_float(pair.ytd),
@@ -61,11 +61,21 @@ def report_markdown(payload: dict[str, Any]) -> str:
     lines.append("")
 
     lines.append("## Extracted Values")
-    lines.append(f"- Gross pay (YTD): {format_money(Decimal(str(extracted['gross_pay']['ytd'])) if extracted['gross_pay']['ytd'] is not None else None)}")
-    lines.append(f"- Federal income tax (YTD): {format_money(Decimal(str(extracted['federal_income_tax']['ytd'])) if extracted['federal_income_tax']['ytd'] is not None else None)}")
-    lines.append(f"- Social Security tax (YTD): {format_money(Decimal(str(extracted['social_security_tax']['ytd'])) if extracted['social_security_tax']['ytd'] is not None else None)}")
-    lines.append(f"- Medicare tax (YTD): {format_money(Decimal(str(extracted['medicare_tax']['ytd'])) if extracted['medicare_tax']['ytd'] is not None else None)}")
-    lines.append(f"- 401(k) contribution (YTD): {format_money(Decimal(str(extracted['k401_contrib']['ytd'])) if extracted['k401_contrib']['ytd'] is not None else None)}")
+    lines.append(
+        f"- Gross pay (YTD): {format_money(Decimal(str(extracted['gross_pay']['ytd'])) if extracted['gross_pay']['ytd'] is not None else None)}"
+    )
+    lines.append(
+        f"- Federal income tax (YTD): {format_money(Decimal(str(extracted['federal_income_tax']['ytd'])) if extracted['federal_income_tax']['ytd'] is not None else None)}"
+    )
+    lines.append(
+        f"- Social Security tax (YTD): {format_money(Decimal(str(extracted['social_security_tax']['ytd'])) if extracted['social_security_tax']['ytd'] is not None else None)}"
+    )
+    lines.append(
+        f"- Medicare tax (YTD): {format_money(Decimal(str(extracted['medicare_tax']['ytd'])) if extracted['medicare_tax']['ytd'] is not None else None)}"
+    )
+    lines.append(
+        f"- 401(k) contribution (YTD): {format_money(Decimal(str(extracted['k401_contrib']['ytd'])) if extracted['k401_contrib']['ytd'] is not None else None)}"
+    )
 
     state_rows = extracted.get("state_income_tax", {})
     if state_rows:
@@ -110,17 +120,14 @@ def report_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def snapshot_to_payload(snapshot) -> dict[str, Any]:
+def snapshot_to_payload(snapshot: Any) -> dict[str, Any]:
     return {
         "gross_pay": pair_to_dict(snapshot.gross_pay),
         "federal_income_tax": pair_to_dict(snapshot.federal_income_tax),
         "social_security_tax": pair_to_dict(snapshot.social_security_tax),
         "medicare_tax": pair_to_dict(snapshot.medicare_tax),
         "k401_contrib": pair_to_dict(snapshot.k401_contrib),
-        "state_income_tax": {
-            state: pair_to_dict(pair)
-            for state, pair in sorted(snapshot.state_income_tax.items())
-        },
+        "state_income_tax": {state: pair_to_dict(pair) for state, pair in sorted(snapshot.state_income_tax.items())},
     }
 
 
@@ -132,10 +139,16 @@ def main() -> None:
     parser.add_argument("--w2-pdf", type=Path, default=None, help="Path to W-2 PDF (OCR-extracted for matching).")
     parser.add_argument("--write-w2-template", type=Path, default=None, help="Write a W-2 template and exit.")
     parser.add_argument("--render-scale", type=float, default=2.5, help="OCR render scale (default: 2.5).")
-    parser.add_argument("--w2-render-scale", type=float, default=3.0, help="W-2 OCR render scale when using --w2-pdf (default: 3.0).")
+    parser.add_argument(
+        "--w2-render-scale", type=float, default=3.0, help="W-2 OCR render scale when using --w2-pdf (default: 3.0)."
+    )
     parser.add_argument("--tolerance", type=Decimal, default=Decimal("0.01"), help="Match tolerance in dollars.")
-    parser.add_argument("--json-out", type=Path, default=Path("reports/w2_validation.json"), help="Machine-readable output path.")
-    parser.add_argument("--report-out", type=Path, default=Path("reports/w2_validation.md"), help="Markdown report output path.")
+    parser.add_argument(
+        "--json-out", type=Path, default=Path("reports/w2_validation.json"), help="Machine-readable output path."
+    )
+    parser.add_argument(
+        "--report-out", type=Path, default=Path("reports/w2_validation.md"), help="Markdown report output path."
+    )
     args = parser.parse_args()
 
     if args.write_w2_template:
@@ -144,9 +157,7 @@ def main() -> None:
             template_files = list_paystub_files(Path(args.paystubs_dir), year=args.year)
             if template_files:
                 latest_template_file, _ = select_latest_paystub(template_files)
-                template_snapshot = extract_paystub_snapshot(
-                    latest_template_file, render_scale=args.render_scale
-                )
+                template_snapshot = extract_paystub_snapshot(latest_template_file, render_scale=args.render_scale)
                 states = sorted(template_snapshot.state_income_tax.keys()) or None
 
         template = build_w2_template(states=states)

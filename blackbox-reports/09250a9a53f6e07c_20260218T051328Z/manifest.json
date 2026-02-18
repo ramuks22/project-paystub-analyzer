@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "meta": {
+    "testId": "09250a9a53f6e07c",
+    "testName": "test_filing_safety_fail_critical_issue",
+    "testClass": "tests/test_filing_rules.py",
+    "status": "FAILED",
+    "timestamp": "2026-02-18T05:13:28Z",
+    "durationMs": 15,
+    "runId": "c1f84cf9-5c84-4495-83ed-2b6fd2d1cf9d",
+    "framework": {
+      "name": "pytest",
+      "version": "8.0.0"
+    },
+    "runtime": {
+      "language": "python",
+      "version": "3.11.9",
+      "os": "Darwin",
+      "arch": "arm64"
+    }
+  },
+  "context": {},
+  "steps": [],
+  "exception": {
+    "type": "AssertionError",
+    "message": "assert True is False\n +  where True = FilingCheckResult(passed=True, errors=[], warnings=['Consistency warning: None - None']).passed",
+    "stackTrace": "def test_filing_safety_fail_critical_issue():\n        extracted = {\n            \"gross_pay\": {\"ytd\": Decimal(\"50000.00\")},\n            \"federal_income_tax\": {\"ytd\": Decimal(\"5000.00\")},\n            \"social_security_tax\": {\"ytd\": Decimal(\"3100.00\")},\n            \"medicare_tax\": {\"ytd\": Decimal(\"725.00\")},\n        }\n        comparisons = []\n        # Mocking a critical issue dict\n        issues = [{\"severity\": \"critical\", \"message\": \"Date mismatch\"}]\n        tolerance = Decimal(\"0.05\")\n    \n        result = validate_filing_safety(extracted, comparisons, issues, tolerance)\n>       assert result.passed is False\nE       AssertionError: assert True is False\nE        +  where True = FilingCheckResult(passed=True, errors=[], warnings=['Consistency warning: None - None']).passed\n\ntests/test_filing_rules.py:62: AssertionError"
+  },
+  "artifacts": {
+    "bundleDir": "09250a9a53f6e07c_20260218T051328Z",
+    "logs": "context.log"
+  }
+}

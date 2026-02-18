@@ -26,7 +26,8 @@ from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
 def read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        data: dict[str, Any] = json.load(handle)
+        return data
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -67,7 +68,9 @@ def write_ledger_csv(path: Path, ledger: list[dict[str, Any]]) -> None:
         writer.writeheader()
         for row in ledger:
             to_write = dict(row)
-            to_write["state_tax_this_period_by_state"] = json.dumps(row["state_tax_this_period_by_state"], sort_keys=True)
+            to_write["state_tax_this_period_by_state"] = json.dumps(
+                row["state_tax_this_period_by_state"], sort_keys=True
+            )
             to_write["state_tax_ytd_by_state"] = json.dumps(row["state_tax_ytd_by_state"], sort_keys=True)
             writer.writerow(to_write)
 
@@ -148,7 +151,7 @@ def main() -> None:
     # Check filing safety
     safety = package.get("filing_safety_check", {})
     safety_passed = safety.get("passed", False)
-    
+
     if not safety_passed:
         print("\n" + "!" * 60)
         print("CRITICAL: FILING SAFETY CHECK FAILED")
@@ -156,7 +159,7 @@ def main() -> None:
         for err in safety.get("errors", []):
             print(f"- [BLOCKING] {err}")
         print("\n")
-        
+
         if not args.force:
             print("Aborting generation. Use --force to override (not recommended for filing).")
             sys.exit(1)
@@ -168,11 +171,11 @@ def main() -> None:
     write_markdown(package_md_out, package_to_markdown(package))
 
     extracted = package["extracted"]
-    print(
-        f"Analyzed paystubs: raw={package['paystub_count_raw']} canonical={package['paystub_count_canonical']}"
-    )
+    print(f"Analyzed paystubs: raw={package['paystub_count_raw']} canonical={package['paystub_count_canonical']}")
     print(f"Latest paystub date: {package['latest_pay_date']}")
-    print(f"Federal income tax YTD: {format_money(Decimal(str(extracted['federal_income_tax']['ytd'])) if extracted['federal_income_tax']['ytd'] is not None else None)}")
+    print(
+        f"Federal income tax YTD: {format_money(Decimal(str(extracted['federal_income_tax']['ytd'])) if extracted['federal_income_tax']['ytd'] is not None else None)}"
+    )
     state_sum = Decimal("0.00")
     for row in extracted.get("state_income_tax", {}).values():
         if row["ytd"] is not None:
@@ -184,7 +187,7 @@ def main() -> None:
     print(f"Package JSON: {package_json_out}")
     print(f"Package Markdown: {package_md_out}")
 
-    if not safety_passed:
+    if not safety_passed and not args.force:
         sys.exit(1)
 
 

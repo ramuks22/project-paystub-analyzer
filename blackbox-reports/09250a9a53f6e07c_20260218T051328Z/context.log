@@ -1,0 +1,14 @@
+BlackBox context log
+testClass=tests/test_filing_rules.py
+testName=test_filing_safety_fail_critical_issue
+testId=09250a9a53f6e07c
+runId=c1f84cf9-5c84-4495-83ed-2b6fd2d1cf9d
+status=FAILED
+timestamp=2026-02-18T05:13:28Z
+durationMs=15
+
+context:
+- (none)
+
+steps:
+- (none)

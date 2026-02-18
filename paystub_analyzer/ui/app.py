@@ -6,15 +6,13 @@ import csv
 import hashlib
 import io
 import json
-import sys
 import tempfile
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import streamlit as st
 
-import streamlit as st
 
 from paystub_analyzer.core import (
     as_float,
@@ -23,6 +21,7 @@ from paystub_analyzer.core import (
     list_paystub_files,
     select_latest_paystub,
     sum_state_ytd,
+    PaystubSnapshot,
 )
 from paystub_analyzer.annual import (
     build_tax_filing_package,
@@ -60,6 +59,17 @@ def apply_theme() -> None:
   --border-strong: #ced4da;
 }
 
+/* Reduce default spacing */
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+div[data-testid="stVerticalBlock"] > div {
+    gap: 0.75rem !important; /* Reduce gap between elements */
+}
+
 /* Global resets for Streamlit containers */
 [data-testid="stAppViewContainer"] {
   background-color: var(--bg-core);
@@ -81,40 +91,44 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   font-weight: 700;
   letter-spacing: -0.02em;
+  margin-bottom: 0.5rem !important; /* Tighten headers */
 }
 
+/* Fix global text spilling into Tooltips or unexpected places */
 div[data-testid="stMarkdownContainer"] p, 
 div[data-testid="stMarkdownContainer"] li {
   color: var(--text-primary);
   font-size: 1rem;
-  line-height: 1.6;
+  line-height: 1.5; /* Slightly tighter line height */
+  margin-bottom: 0.5rem; /* Reduce paragraph spacing */
 }
 
 .stCaption {
   color: var(--text-tertiary) !important;
+  font-size: 0.85rem !important;
 }
 
 /* Custom Card Component */
 .metric-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  margin-bottom: 0.5rem;
+  border-radius: 6px;
+  padding: 0.75rem 1rem; /* Tighter padding */
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05); /* Softer shadow */
+  margin-bottom: 0px; /* Let flex gap handle spacing */
 }
 
 .metric-card .label {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-tertiary);
   font-weight: 600;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.2rem;
 }
 
 .metric-card .value {
-  font-size: 1.25rem;
+  font-size: 1.15rem; /* Slightly smaller value text */
   font-weight: 700;
   color: var(--brand-primary);
   font-family: 'JetBrains Mono', monospace;
@@ -126,6 +140,7 @@ div[data-baseweb="input"] > div {
   background-color: var(--bg-core) !important;
   border-color: var(--border-strong) !important;
   color: var(--text-primary) !important;
+  min-height: 38px; /* Standardize height */
 }
 
 div[data-baseweb="input"] input,
@@ -144,6 +159,8 @@ label[data-baseweb="radio"] span,
 .stSelectbox label,
 .stFileUploader label {
   color: var(--text-primary) !important;
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
 }
 
 /* Fix for disabled inputs if needed */
@@ -152,21 +169,73 @@ div[data-baseweb="input"] input:disabled {
   -webkit-text-fill-color: var(--text-tertiary) !important;
 }
 
-button[kind="primary"] {
+/* Button Styling Fixes */
+div.stButton > button {
+    width: auto !important; /* Prevent full width by default */
+    min-width: 140px; /* Minimum width for consistency */
+    border-radius: 6px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: normal !important;
+    padding-top: 0.5rem !important;
+    padding-bottom: 0.5rem !important;
+}
+
+/* Fix for number input step buttons getting stuck in active state color */
+button[data-baseweb="spinbutton"] {
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+    border: none !important;
+}
+button[data-baseweb="spinbutton"]:hover {
+    background-color: var(--bg-subtle) !important;
+    color: var(--brand-primary) !important;
+}
+button[data-baseweb="spinbutton"]:active,
+button[data-baseweb="spinbutton"]:focus {
+    background-color: var(--bg-subtle) !important;
+    color: var(--brand-primary) !important;
+    box-shadow: none !important; /* Remove stuck focus ring if any */
+}
+
+/* Primary Button (Build Packet, Extract, etc.) */
+div.stButton > button[kind="primary"],
+div.stButton > button[kind="primary"]:focus,
+div.stButton > button[kind="primary"]:active {
   background-color: var(--brand-primary) !important;
-  color: #ffffff !important;
-  border: none !important;
-  transition: background-color 0.15s ease-in-out;
+  color: #ffffff !important; /* Force white text */
+  border: 1px solid var(--brand-primary) !important;
 }
 
-button[kind="primary"]:hover {
+div.stButton > button[kind="primary"]:hover {
   background-color: var(--brand-primary-hover) !important;
+  border-color: var(--brand-primary-hover) !important;
+  color: #ffffff !important;
 }
 
-button[kind="secondary"] {
+/* Secondary Button (Standard actions) */
+div.stButton > button[kind="secondary"] {
   background-color: var(--bg-surface) !important;
   color: var(--text-primary) !important;
   border: 1px solid var(--border-strong) !important;
+}
+div.stButton > button[kind="secondary"]:hover {
+  border-color: var(--text-tertiary) !important;
+  background-color: var(--bg-subtle) !important;
+}
+
+/* Tooltip Fix (Attempt to override dark-on-dark if Streamlit inherits colors incorrectly) */
+div[data-testid="stTooltipContent"] {
+    background-color: #333333 !important;
+    color: #ffffff !important;
+}
+div[role="tooltip"] {
+    background-color: #333333 !important;
+    color: #ffffff !important;
+    font-size: 0.85rem;
 }
 
 /* Status Pills */
@@ -216,6 +285,8 @@ def reset_session_if_schema_changed() -> None:
         "box6",
     ]
     for key in list(st.session_state.keys()):
+        if not isinstance(key, str):
+            continue
         if key in keys_to_clear or key.startswith("box16_") or key.startswith("box17_"):
             st.session_state.pop(key, None)
     st.session_state["_app_schema_version"] = APP_SESSION_SCHEMA_VERSION
@@ -233,7 +304,7 @@ def metric_card(label: str, value: str) -> None:
     )
 
 
-def snapshot_to_dict(snapshot) -> dict[str, Any]:
+def snapshot_to_dict(snapshot: PaystubSnapshot) -> dict[str, Any]:
     return {
         "file": snapshot.file,
         "pay_date": snapshot.pay_date,
@@ -369,18 +440,14 @@ def sync_manual_w2_from_upload(
     st.session_state["box2"] = as_number(
         uploaded_w2_data.get("box_2_federal_income_tax_withheld"), st.session_state["box2"]
     )
-    st.session_state["box3"] = as_number(
-        uploaded_w2_data.get("box_3_social_security_wages"), st.session_state["box3"]
-    )
+    st.session_state["box3"] = as_number(uploaded_w2_data.get("box_3_social_security_wages"), st.session_state["box3"])
     st.session_state["box4"] = as_number(
         uploaded_w2_data.get("box_4_social_security_tax_withheld"), st.session_state["box4"]
     )
     st.session_state["box5"] = as_number(
         uploaded_w2_data.get("box_5_medicare_wages_and_tips"), st.session_state["box5"]
     )
-    st.session_state["box6"] = as_number(
-        uploaded_w2_data.get("box_6_medicare_tax_withheld"), st.session_state["box6"]
-    )
+    st.session_state["box6"] = as_number(uploaded_w2_data.get("box_6_medicare_tax_withheld"), st.session_state["box6"])
 
     for state in form_states:
         state_row = uploaded_states.get(state)
@@ -391,7 +458,7 @@ def sync_manual_w2_from_upload(
     st.session_state["manual_w2_prefill_source"] = source_tag
 
 
-def build_manual_w2(snapshot, tax_year: int) -> dict[str, Any]:
+def build_manual_w2(snapshot: PaystubSnapshot, tax_year: int) -> dict[str, Any]:
     states_from_snapshot = sorted(snapshot.state_income_tax.keys()) or ["VA"]
     prior_states = st.session_state.get("manual_w2_states", [])
     states_for_form = sorted(set(states_from_snapshot) | set(prior_states))
@@ -481,9 +548,7 @@ def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
         csv_row["state_tax_this_period_by_state"] = json.dumps(
             csv_row["state_tax_this_period_by_state"], sort_keys=True
         )
-        csv_row["state_tax_ytd_by_state"] = json.dumps(
-            csv_row["state_tax_ytd_by_state"], sort_keys=True
-        )
+        csv_row["state_tax_ytd_by_state"] = json.dumps(csv_row["state_tax_ytd_by_state"], sort_keys=True)
         writer.writerow(csv_row)
     return buffer.getvalue()
 
@@ -523,9 +588,7 @@ def main() -> None:
             index=[str(path) for path in files].index(str(latest_file)),
         )
     else:
-        st.caption(
-            "Year mode will process every payslip in this folder/year and show a full-year summary."
-        )
+        st.caption("Year mode will process every payslip in this folder/year and show a full-year summary.")
 
     if st.button("Extract Values", type="primary"):
         if analysis_scope == "All payslips in year":
@@ -554,10 +617,11 @@ def main() -> None:
             st.session_state.pop("annual_summary_preview", None)
             st.session_state["analysis_scope"] = "single"
 
-    snapshot = st.session_state.get("snapshot")
-    if snapshot is None:
+    snapshot_data = st.session_state.get("snapshot")
+    if snapshot_data is None:
         st.info("Click 'Extract Values' to begin.")
         return
+    snapshot = cast(PaystubSnapshot, snapshot_data)
 
     active_scope = st.session_state.get("analysis_scope", "single")
     extracted = snapshot_to_dict(snapshot)
@@ -585,20 +649,23 @@ def main() -> None:
                     metric_card(f"{state} Tax YTD", format_money(pair.ytd))
 
     if active_scope == "all_year":
-        annual_summary = st.session_state.get("annual_summary_preview")
-        if annual_summary:
+        annual_summary_data = st.session_state.get("annual_summary_preview")
+        current_annual_summary: dict[str, Any] | None = None
+        if annual_summary_data:
+            current_annual_summary = cast(dict[str, Any], annual_summary_data)
+        if current_annual_summary:
             st.markdown("### Whole-Year Summary (From Payslips)")
             y1, y2, y3, y4 = st.columns(4)
             with y1:
-                metric_card("Paystubs (Canonical)", str(annual_summary["paystub_count_canonical"]))
+                metric_card("Paystubs (Canonical)", str(current_annual_summary["paystub_count_canonical"]))
             with y2:
-                gross_ytd = annual_summary["extracted"]["gross_pay"]["ytd"]
+                gross_ytd = current_annual_summary["extracted"]["gross_pay"]["ytd"]
                 metric_card(
                     "Gross Pay YTD",
                     format_money(Decimal(str(gross_ytd)) if gross_ytd is not None else None),
                 )
             with y3:
-                federal_ytd = annual_summary["extracted"]["federal_income_tax"]["ytd"]
+                federal_ytd = current_annual_summary["extracted"]["federal_income_tax"]["ytd"]
                 metric_card(
                     "Federal Tax YTD",
                     format_money(Decimal(str(federal_ytd)) if federal_ytd is not None else None),
@@ -607,18 +674,18 @@ def main() -> None:
                 metric_card("State Tax YTD Total", format_money(state_total))
 
             st.caption(
-                f"Raw paystub files processed: {annual_summary['paystub_count_raw']} | "
-                f"Latest pay date: {annual_summary['latest_pay_date']}"
+                f"Raw paystub files processed: {current_annual_summary['paystub_count_raw']} | "
+                f"Latest pay date: {current_annual_summary['latest_pay_date']}"
             )
             st.markdown("#### Per-Payslip Year Ledger")
-            st.dataframe(annual_summary["ledger"], use_container_width=True)
+            st.dataframe(current_annual_summary["ledger"], use_container_width=True)
             ytd_flagged = [
                 {
                     "pay_date": row.get("pay_date"),
                     "file": row.get("file"),
                     "ytd_verification": row.get("ytd_verification"),
                 }
-                for row in annual_summary["ledger"]
+                for row in current_annual_summary["ledger"]
                 if row.get("ytd_verification")
             ]
             if ytd_flagged:
@@ -629,7 +696,7 @@ def main() -> None:
                 st.dataframe(ytd_flagged, use_container_width=True)
             st.download_button(
                 "Download Year Ledger CSV",
-                data=ledger_to_csv(annual_summary["ledger"]),
+                data=ledger_to_csv(current_annual_summary["ledger"]),
                 file_name=f"paystub_ledger_{int(year)}.csv",
                 mime="text/csv",
             )
@@ -701,7 +768,7 @@ def main() -> None:
 
     with st.form("manual_w2_form"):
         manual_w2 = build_manual_w2(snapshot, int(year))
-        submitted = st.form_submit_button("Compare Against W-2")
+        submitted = st.form_submit_button("Compare Against W-2", type="primary")
 
     selected_w2 = manual_w2
     if submitted:
@@ -744,9 +811,7 @@ def main() -> None:
 
     st.markdown("---")
     st.markdown("### Annual Filing Packet")
-    st.caption(
-        "Build a year-wide ledger from all payslips, run consistency checks, and generate a filing packet."
-    )
+    st.caption("Build a year-wide ledger from all payslips, run consistency checks, and generate a filing packet.")
 
     include_w2 = st.checkbox(
         "Include W-2 comparison in annual packet",
@@ -754,13 +819,9 @@ def main() -> None:
         help="Disable this to build the packet from paystubs only.",
     )
     if include_w2:
-        st.caption(
-            "Checkbox ON: annual packet includes W-2 match/mismatch checks and influences Ready To File."
-        )
+        st.caption("Checkbox ON: annual packet includes W-2 match/mismatch checks and influences Ready To File.")
     else:
-        st.caption(
-            "Checkbox OFF: annual packet is paystub-only (no W-2 comparison), useful for extraction QA."
-        )
+        st.caption("Checkbox OFF: annual packet is paystub-only (no W-2 comparison), useful for extraction QA.")
     if st.button(
         "Build Annual Filing Packet",
         type="primary",
@@ -784,46 +845,44 @@ def main() -> None:
         )
         st.session_state["annual_packet"] = packet
 
-    packet = st.session_state.get("annual_packet")
-    if packet:
+    packet_data = st.session_state.get("annual_packet")
+    current_packet = None
+    if packet_data:
+        current_packet = cast(dict[str, Any], packet_data)
+    if current_packet:
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Paystubs (Canonical)", packet["paystub_count_canonical"])
-        p2.metric("Authenticity Score", packet["authenticity_assessment"]["score"])
-        p3.metric("Ready To File", str(packet["ready_to_file"]))
-        critical_count = sum(
-            1 for issue in packet["consistency_issues"] if issue["severity"] == "critical"
-        )
+        p1.metric("Paystubs (Canonical)", current_packet["paystub_count_canonical"])
+        p2.metric("Authenticity Score", current_packet["authenticity_assessment"]["score"])
+        p3.metric("Ready To File", str(current_packet["ready_to_file"]))
+        critical_count = sum(1 for issue in current_packet["consistency_issues"] if issue["severity"] == "critical")
         p4.metric("Critical Issues", critical_count)
-        st.caption(f"Raw paystub files analyzed: {packet['paystub_count_raw']}")
+        st.caption(f"Raw paystub files analyzed: {current_packet['paystub_count_raw']}")
 
         st.markdown("#### Consistency Issues")
-        if not packet["consistency_issues"]:
+        if not current_packet["consistency_issues"]:
             st.success("No consistency issues detected.")
         else:
-            for issue in packet["consistency_issues"]:
+            for issue in current_packet["consistency_issues"]:
                 prefix = "[CRITICAL]" if issue["severity"] == "critical" else "[WARNING]"
                 st.markdown(f"- {prefix} `{issue['code']}`: {issue['message']}")
 
         st.markdown("#### Filing Checklist")
-        for item in packet["filing_checklist"]:
+        for item in current_packet["filing_checklist"]:
             st.markdown(f"- **{item['item']}**: {item['detail']}")
 
         st.markdown("#### Annual Ledger")
-        st.dataframe(packet["ledger"], use_container_width=True)
+        st.dataframe(current_packet["ledger"], use_container_width=True)
         packet_ytd_flagged = [
             {
                 "pay_date": row.get("pay_date"),
                 "file": row.get("file"),
                 "ytd_verification": row.get("ytd_verification"),
             }
-            for row in packet["ledger"]
+            for row in current_packet["ledger"]
             if row.get("ytd_verification")
         ]
         if packet_ytd_flagged:
-            st.warning(
-                "YTD verification flags were found in this filing packet. "
-                "Check the rows below before filing."
-            )
+            st.warning("YTD verification flags were found in this filing packet. Check the rows below before filing.")
             st.dataframe(packet_ytd_flagged, use_container_width=True)
 
         packet_json = json.dumps(packet, indent=2)

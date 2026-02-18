@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from decimal import Decimal
 from pathlib import Path
+
+from typing import Any
 
 from paystub_analyzer.core import (
     as_float,
@@ -20,6 +21,7 @@ from paystub_analyzer.core import (
     list_paystub_files,
     sum_state_this_period,
     sum_state_ytd,
+    PaystubSnapshot,
 )
 
 
@@ -27,7 +29,7 @@ def money_or_none(value: Decimal | None) -> str:
     return format_money(value) if value is not None else "n/a"
 
 
-def snapshot_to_json(snapshot) -> dict:
+def snapshot_to_json(snapshot: PaystubSnapshot) -> dict[str, Any]:
     states = {
         state: {
             "this_period": as_float(pair.this_period),
@@ -62,15 +64,23 @@ def snapshot_to_json(snapshot) -> dict:
     }
 
 
-def output_human(results: list[dict]) -> None:
+def output_human(results: list[dict[str, Any]]) -> None:
     agg_this = Decimal("0.00")
     agg_ytd = Decimal("0.00")
 
     for row in results:
-        federal_this = Decimal(str(row["federal"]["this_period"])) if row["federal"]["this_period"] is not None else None
+        federal_this = (
+            Decimal(str(row["federal"]["this_period"])) if row["federal"]["this_period"] is not None else None
+        )
         federal_ytd = Decimal(str(row["federal"]["ytd"])) if row["federal"]["ytd"] is not None else None
-        state_this = Decimal(str(row["state_total"]["this_period"])) if row["state_total"]["this_period"] is not None else Decimal("0.00")
-        state_ytd = Decimal(str(row["state_total"]["ytd"])) if row["state_total"]["ytd"] is not None else Decimal("0.00")
+        state_this = (
+            Decimal(str(row["state_total"]["this_period"]))
+            if row["state_total"]["this_period"] is not None
+            else Decimal("0.00")
+        )
+        state_ytd = (
+            Decimal(str(row["state_total"]["ytd"])) if row["state_total"]["ytd"] is not None else Decimal("0.00")
+        )
 
         if federal_this is not None:
             agg_this += federal_this + state_this
@@ -96,7 +106,9 @@ def output_human(results: list[dict]) -> None:
         if row["states"]:
             print("State Breakdown (This Period / YTD):")
             for state, state_row in sorted(row["states"].items()):
-                state_this_val = Decimal(str(state_row["this_period"])) if state_row["this_period"] is not None else None
+                state_this_val = (
+                    Decimal(str(state_row["this_period"])) if state_row["this_period"] is not None else None
+                )
                 state_ytd_val = Decimal(str(state_row["ytd"])) if state_row["ytd"] is not None else None
                 print(f"  {state}: {money_or_none(state_this_val)} / {money_or_none(state_ytd_val)}")
         else:

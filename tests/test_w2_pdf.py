@@ -1,8 +1,11 @@
 import unittest
 
+import pytest
+
 from paystub_analyzer.w2_pdf import extract_w2_from_lines
 
 
+@pytest.mark.unit
 class W2PdfParsingTests(unittest.TestCase):
     def test_extract_core_boxes_from_lines(self) -> None:
         lines = [

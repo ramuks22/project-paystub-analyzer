@@ -1,10 +1,14 @@
+import logging
+import unittest
 from decimal import Decimal
 from pathlib import Path
-import unittest
+
+import pytest
 
 from paystub_analyzer.core import parse_amount_pair_from_line, parse_pay_date_from_filename
 
 
+@pytest.mark.unit
 class CoreParsingTests(unittest.TestCase):
     def test_amount_pair_standard_this_period_and_ytd(self) -> None:
         line = "Federal Income Tax -1,518.02 1,518.02"
