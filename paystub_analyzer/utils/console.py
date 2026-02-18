@@ -99,8 +99,8 @@ def ask_input(prompt_text: str, default: Optional[str] = None, required: bool = 
 
     if RICH_AVAILABLE:
         if default is not None:
-            return Prompt.ask(prompt_text, default=default)
-        return Prompt.ask(prompt_text)
+            return str(Prompt.ask(prompt_text, default=default))
+        return str(Prompt.ask(prompt_text))
     else:
         p = f"{prompt_text} [{default}]: " if default else f"{prompt_text}: "
         val = input(p).strip()
@@ -115,7 +115,7 @@ def ask_confirm(prompt_text: str, default: bool = False) -> bool:
         return default
 
     if RICH_AVAILABLE:
-        return Confirm.ask(prompt_text, default=default)
+        return bool(Confirm.ask(prompt_text, default=default))
     else:
         d_str = "Y/n" if default else "y/N"
         val = input(f"{prompt_text} ({d_str}): ").strip().lower()
