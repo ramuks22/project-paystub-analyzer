@@ -1,0 +1,53 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/project-paystub-analyzer/schemas/w2_comparison.json",
+    "title": "W-2 Comparison Output",
+    "description": "Schema for W-2 validation results.",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "match_status",
+        "discrepancies"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "pattern": "^0\\.2\\.\\d+$"
+        },
+        "match_status": {
+            "type": "string",
+            "enum": [
+                "MATCH",
+                "MISMATCH",
+                "REVIEW_NEEDED"
+            ]
+        },
+        "discrepancies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "field",
+                    "paystub_value_cents",
+                    "w2_value_cents",
+                    "diff_cents"
+                ],
+                "properties": {
+                    "field": {
+                        "type": "string"
+                    },
+                    "paystub_value_cents": {
+                        "type": "integer"
+                    },
+                    "w2_value_cents": {
+                        "type": "integer"
+                    },
+                    "diff_cents": {
+                        "type": "integer"
+                    }
+                }
+            }
+        }
+    }
+}

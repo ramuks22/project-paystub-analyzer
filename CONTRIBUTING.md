@@ -44,6 +44,18 @@ We enforce strict code quality standards:
 
 Please ensure all checks pass before submitting a PR. The pre-commit hooks will help you with this.
 
+## Data Contracts & Schema Policy
+
+We enforce strict data contracts for all public outputs (JSON reports).
+
+*   **Schema Versioning**: All JSON outputs MUST include a `schema_version` field (e.g., `"schema_version": "0.2.0"`).
+*   **Compliance**: Output validation against the defined JSON Schema is mandatory in CI.
+*   **Versioning Scheme**: We follow Semantic Versioning (MAJOR.MINOR.PATCH) for schemas.
+    *   **PATCH**: Backward-compatible fixes (e.g., adding a non-required field).
+    *   **MINOR**: Backward-compatible feature additions.
+    *   **MAJOR**: Breaking changes (e.g., renaming/removing fields).
+*   **Breaking Changes**: Any breaking change requires a MAJOR version bump and a migration guide.
+
 ## Pull Request Process
 
 1.  Fork the repo and create your branch from `main`.

@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/project-paystub-analyzer/schemas/annual_summary.json",
+  "title": "Annual Summary Output",
+  "description": "Schema for the household annual tax summary report.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "household_summary",
+    "filers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^0\\.2\\.\\d+$",
+      "description": "Semantic version of this schema (e.g., 0.2.0)"
+    },
+    "household_summary": {
+      "type": "object",
+      "required": [
+        "total_gross_pay_cents",
+        "total_fed_tax_cents",
+        "ready_to_file"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "total_gross_pay_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_fed_tax_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ready_to_file": {
+          "type": "boolean"
+        }
+      }
+    },
+    "filers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "gross_pay_cents",
+          "fed_tax_cents",
+          "state_tax_by_state_cents",
+          "status",
+          "audit_flags"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "PRIMARY",
+              "SPOUSE"
+            ]
+          },
+          "gross_pay_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fed_tax_cents": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state_tax_by_state_cents": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "MATCH",
+              "MISMATCH",
+              "REVIEW_NEEDED",
+              "MISSING_DATA"
+            ]
+          },
+          "audit_flags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
