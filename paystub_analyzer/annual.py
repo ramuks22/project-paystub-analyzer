@@ -822,6 +822,10 @@ def build_household_package(
     if roles.count("SPOUSE") > 1:
         raise ValueError("Household can have at most one SPOUSE filer.")
 
+    ids = [f["id"] for f in filers]
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"Duplicate filer IDs found: {ids}")
+
     # 2. Duplicate Source Detection (Global)
     # This requires looking at the loaded snapshots or paths BEFORE processing?
     # Or we trust the loader to give us paths.

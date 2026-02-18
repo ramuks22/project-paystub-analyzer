@@ -80,3 +80,20 @@ def test_household_cardinality_error(mock_loader, mock_w2_loader):
     config = {"filers": [{"id": "s1", "role": "SPOUSE", "sources": {}}]}
     with pytest.raises(ValueError, match="exactly one PRIMARY"):
         build_household_package(config, 2025, mock_loader, mock_w2_loader, Decimal("0.01"))
+
+
+def test_household_duplicate_ids_error(mock_loader, mock_w2_loader):
+    config = {
+        "version": "0.2.0",
+        "household_id": "test_dup_ids",
+        "filers": [
+            {"id": "p1", "role": "PRIMARY", "sources": {"paystubs_dir": "dir1"}},
+            {"id": "p1", "role": "SPOUSE", "sources": {"paystubs_dir": "dir2"}},
+        ],
+    }
+    # Mock loader logic isn't even reached due to early ID validation
+    # But we mock it anyway to be safe
+    mock_loader.return_value = []
+
+    with pytest.raises(ValueError, match="Duplicate filer IDs found"):
+        build_household_package(config, 2025, mock_loader, mock_w2_loader, Decimal("0.01"))
