@@ -17,7 +17,7 @@ def extract_release_notes(version: str, changelog_path: str = "CHANGELOG.md") ->
 
     # Regex to find the section for the version.
     # Matches: ## [version] - date ... content ... until next ## [version] or end of file
-    pattern = rf"## \[{re.escape(version)}\](?: - .+)?\n(.*?)(?=\n## \[|$)"
+    pattern = rf"## \[{re.escape(version)}\](?: - [^\n]+)?\n(.*?)(?=\n## \[|$)"
     match = re.search(pattern, content, re.DOTALL)
 
     if not match:

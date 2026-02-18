@@ -181,11 +181,9 @@ def main() -> None:
     # Minimal compliant payload for v0.2.0 W-2 schema
     contract_payload: dict[str, Any] = {
         "schema_version": "0.2.0",
-        "match_status": "REVIEW_NEEDED",  # Default for now
+        "match_status": "REVIEW_NEEDED",  # Default
         "discrepancies": [],
     }
-
-    validate_output(contract_payload, "w2_comparison", mode="REVIEW")  # Warn only for CLI tool
 
     if args.w2_json and args.w2_pdf:
         raise SystemExit("Use either --w2-json or --w2-pdf, not both.")
@@ -201,23 +199,57 @@ def main() -> None:
             fallback_year=args.year,
         )
 
+    comparisons: list[dict[str, Any]] = []
+    summary: dict[str, Any] = {}
+
     if w2_data:
         comparisons, summary = compare_snapshot_to_w2(snapshot, w2_data, args.tolerance)
-        contract_payload["w2_input"] = w2_data
-        contract_payload["comparisons"] = comparisons
-        contract_payload["comparison_summary"] = summary
+
+        # Populate strict schema fields
+        if summary.get("mismatch", 0) > 0:
+            contract_payload["match_status"] = "MISMATCH"
+        elif summary.get("match", 0) > 0 and summary.get("review_needed", 0) == 0:
+            contract_payload["match_status"] = "MATCH"
+        else:
+            contract_payload["match_status"] = "REVIEW_NEEDED"
+
+        # Populate discrepancies (only diffs)
+        def to_cents(x: Any) -> int:
+            return int(round(x * 100)) if isinstance(x, (int, float, Decimal)) else 0
+
+        for row in comparisons:
+            # We only care about rows with a difference or mismatch for the discrepancies list?
+            # Schema says "discrepancies" (plural). Usually implies things that don't match.
+            # But the schema requires 'field', 'paystub_value_cents', 'w2_value_cents', 'diff_cents'.
+            # Let's include everything that has a non-zero difference?
+            # Or should we include everything?
+            # Given "discrepancies", I'll include things where status is not MATCH.
+            if row["status"] != "MATCH":
+                contract_payload["discrepancies"].append(
+                    {
+                        "field": row["field"],
+                        "paystub_value_cents": to_cents(row.get("paystub")),
+                        "w2_value_cents": to_cents(row.get("w2")),
+                        "diff_cents": to_cents(row.get("difference")),
+                    }
+                )
+
+    validate_output(contract_payload, "w2_comparison", mode="REVIEW")
 
     write_json(args.json_out, contract_payload)
 
     # Construct a legacy-compatible payload for the markdown report
+    # This payload can have whatever keys the report_markdown function needs
     report_payload = {
         "tax_year": args.year if args.year is not None else latest_date.year,
         "latest_paystub_file": str(latest_file),
         "latest_pay_date": latest_date.isoformat(),
         "extracted": extracted,
-        "comparisons": contract_payload.get("comparisons", []),
-        "comparison_summary": contract_payload.get("comparison_summary", {}),
+        "comparisons": comparisons,
+        "comparison_summary": summary,
     }
+    if w2_data:
+        report_payload["w2_input"] = w2_data
 
     write_text(args.report_out, report_markdown(report_payload))
 
