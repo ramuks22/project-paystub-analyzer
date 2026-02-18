@@ -100,6 +100,11 @@ def main() -> None:
         default=None,
         help="Markdown output path for filing package.",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Generate package even if safety checks fail (exit code will still be non-zero unless suppressed).",
+    )
     args = parser.parse_args()
 
     ledger_csv_out = args.ledger_csv_out or Path(f"reports/paystub_ledger_{args.year}.csv")
@@ -113,10 +118,10 @@ def main() -> None:
         psm=6,
     )
     if not snapshots:
-        raise SystemExit(f"No paystubs found in {args.paystubs_dir} for year {args.year}.")
+        sys.exit(f"No paystubs found in {args.paystubs_dir} for year {args.year}.")
 
     if args.w2_json and args.w2_pdf:
-        raise SystemExit("Use either --w2-json or --w2-pdf, not both.")
+        sys.exit("Use either --w2-json or --w2-pdf, not both.")
 
     w2_data = None
     if args.w2_json:
@@ -128,12 +133,34 @@ def main() -> None:
             psm=6,
             fallback_year=args.year,
         )
-    package = build_tax_filing_package(
-        tax_year=args.year,
-        snapshots=snapshots,
-        tolerance=args.tolerance,
-        w2_data=w2_data,
-    )
+
+    try:
+        package = build_tax_filing_package(
+            tax_year=args.year,
+            snapshots=snapshots,
+            tolerance=args.tolerance,
+            w2_data=w2_data,
+        )
+    except Exception as e:
+        sys.exit(f"Error building package: {e}")
+
+    # Check filing safety
+    safety = package.get("filing_safety_check", {})
+    safety_passed = safety.get("passed", False)
+    
+    if not safety_passed:
+        print("\n" + "!" * 60)
+        print("CRITICAL: FILING SAFETY CHECK FAILED")
+        print("!" * 60)
+        for err in safety.get("errors", []):
+            print(f"- [BLOCKING] {err}")
+        print("\n")
+        
+        if not args.force:
+            print("Aborting generation. Use --force to override (not recommended for filing).")
+            sys.exit(1)
+        else:
+            print("WARNING: Generating package despite failures due to --force flag.")
 
     write_ledger_csv(ledger_csv_out, package["ledger"])
     write_json(package_json_out, package)
@@ -155,6 +182,9 @@ def main() -> None:
     print(f"Ledger CSV: {ledger_csv_out}")
     print(f"Package JSON: {package_json_out}")
     print(f"Package Markdown: {package_md_out}")
+
+    if not safety_passed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
