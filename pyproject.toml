@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "project-paystub-analyzer"
+version = "1.0.0"
+description = "Extracts tax data from paystubs, cross-verifies against W-2s, and generates a filing packet."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Sasiekumar Shanmugam", email = "sasiekumarshanmugam@example.com"}
+]
+keywords = ["tax", "ocr", "pdf", "paystub", "finance"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+dependencies = [
+    "pypdfium2>=5.4.0",
+    "streamlit>=1.42.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ramuks22/project-paystub-analyzer"
+Repository = "https://github.com/ramuks22/project-paystub-analyzer"
+
+[project.scripts]
+paystub-analyze = "paystub_analyzer.cli.analyze:main"
+paystub-w2 = "paystub_analyzer.cli.w2_validate:main"
+paystub-annual = "paystub_analyzer.cli.annual:main"
+paystub-ui = "paystub_analyzer.cli.ui:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["paystub_analyzer*"]
+namespaces = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true

@@ -1,4 +1,9 @@
-#!/usr/bin/env python3
+"""
+CLI Entry Point: paystub-analyze
+
+Analyzes federal and state taxes from paystub PDFs.
+Ported from scripts/analyze_payslip_taxes.py.
+"""
 
 from __future__ import annotations
 
@@ -7,10 +12,6 @@ import json
 import sys
 from decimal import Decimal
 from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from paystub_analyzer.core import (
     as_float,
@@ -57,6 +58,7 @@ def snapshot_to_json(snapshot) -> dict:
             "ytd": as_float((federal_ytd or Decimal("0.00")) + state_ytd_total),
         },
         "states": states,
+        "schema_version": "1.0.0",
     }
 
 

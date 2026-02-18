@@ -1,0 +1,5 @@
+[console_scripts]
+paystub-analyze = paystub_analyzer.cli.analyze:main
+paystub-annual = paystub_analyzer.cli.annual:main
+paystub-ui = paystub_analyzer.cli.ui:main
+paystub-w2 = paystub_analyzer.cli.w2_validate:main

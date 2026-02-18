@@ -1,4 +1,9 @@
-#!/usr/bin/env python3
+"""
+CLI Entry Point: paystub-w2
+
+Validate latest paystub values against W-2 inputs.
+Ported from scripts/validate_w2_with_paystubs.py.
+"""
 
 from __future__ import annotations
 
@@ -8,10 +13,6 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from paystub_analyzer.core import (
     as_float,
@@ -164,6 +165,7 @@ def main() -> None:
 
     extracted = snapshot_to_payload(snapshot)
     payload: dict[str, Any] = {
+        "schema_version": "1.0.0",
         "tax_year": args.year if args.year is not None else latest_date.year,
         "latest_paystub_file": str(latest_file),
         "latest_pay_date": latest_date.isoformat(),
@@ -175,12 +177,9 @@ def main() -> None:
     if args.w2_json and args.w2_pdf:
         raise SystemExit("Use either --w2-json or --w2-pdf, not both.")
 
+    w2_data = None
     if args.w2_json:
         w2_data = read_json(args.w2_json)
-        comparisons, summary = compare_snapshot_to_w2(snapshot, w2_data, args.tolerance)
-        payload["w2_input"] = w2_data
-        payload["comparisons"] = comparisons
-        payload["comparison_summary"] = summary
     elif args.w2_pdf:
         w2_data = w2_pdf_to_json_payload(
             pdf_path=args.w2_pdf,
@@ -188,6 +187,8 @@ def main() -> None:
             psm=6,
             fallback_year=args.year,
         )
+
+    if w2_data:
         comparisons, summary = compare_snapshot_to_w2(snapshot, w2_data, args.tolerance)
         payload["w2_input"] = w2_data
         payload["comparisons"] = comparisons
