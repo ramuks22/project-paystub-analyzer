@@ -46,15 +46,15 @@ def apply_theme() -> None:
   --bg-core: #ffffff;
   --bg-surface: #f8f9fa;
   --bg-subtle: #e9ecef;
-  
+
   --text-primary: #1a1a1a;
   --text-secondary: #4a4a4a;
   --text-tertiary: #6c757d;
-  
+
   --brand-primary: #0f5d75;
   --brand-primary-hover: #0b4a5d;
   --brand-secondary: #d97324;
-  
+
   --border-subtle: #dee2e6;
   --border-strong: #ced4da;
 }
@@ -95,7 +95,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Fix global text spilling into Tooltips or unexpected places */
-div[data-testid="stMarkdownContainer"] p, 
+div[data-testid="stMarkdownContainer"] p,
 div[data-testid="stMarkdownContainer"] li {
   color: var(--text-primary);
   font-size: 1rem;

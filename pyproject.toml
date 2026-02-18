@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-paystub-analyzer"
-version = "1.0.0"
-description = "Extracts tax data from paystubs, cross-verifies against W-2s, and generates a filing packet."
+version = "0.1.0"
+description = "Analyze paystubs to extract annual tax data and validate against W-2s, and generates a filing packet."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.1.0",
     "types-setuptools",
     "reportlab>=4.0",
+    "pre-commit>=3.5.0",
 ]
 
 [project.urls]

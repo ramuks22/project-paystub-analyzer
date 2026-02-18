@@ -9,14 +9,14 @@ def mock_paystub_text() -> str:
     return """
     Company Name LLC
     123 Business Rd
-    
+
     Gross Pay: $5,000.00
     Federal Income Tax: $800.00
     Social Security Tax: $310.00
     Medicare Tax: $72.50
     401(K) Contrib: $500.00
     CA State Income Tax: $200.00
-    
+
     Pay Date: 12/31/2025
     """
 

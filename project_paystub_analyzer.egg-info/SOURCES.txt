@@ -20,8 +20,9 @@ project_paystub_analyzer.egg-info/entry_points.txt
 project_paystub_analyzer.egg-info/requires.txt
 project_paystub_analyzer.egg-info/top_level.txt
 tests/test_annual.py
+tests/test_cli_pipeline.py
 tests/test_core.py
-tests/test_e2e.py
+tests/test_e2e_ocr.py
 tests/test_filing_rules.py
 tests/test_integration.py
 tests/test_w2_pdf.py

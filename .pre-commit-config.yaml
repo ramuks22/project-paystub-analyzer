@@ -1,0 +1,48 @@
+repos:
+  # Basic hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  # Linting & Formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.11
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # Secrets Scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.1
+    hooks:
+      - id: gitleaks
+
+  # File Guards (Local)
+  - repo: local
+    hooks:
+      - id: forbid-pdfs
+        name: Forbid PDFs (Potential PII)
+        entry: PDF files are forbidden in the repository to prevent PII leaks.
+        language: fail
+        files: \.pdf$
+        exclude: ^tests/.*|.*template.*\.pdf$
+
+      - id: forbid-sensitive-json
+        name: Forbid Sensitive JSON (W2 logic)
+        entry: JSON files in w2_forms/ must be templates. Real W2 data is forbidden.
+        language: fail
+        files: ^paystub_analyzer/w2_forms/.*\.json$
+        exclude: .*template.*\.json$|^tests/.*
+
+      - id: forbid-paystubs-data
+        name: Forbid Paystub Data
+        entry: Real paystubs or data files in pay_statements/ are forbidden.
+        language: fail
+        files: ^pay_statements/.*
+        exclude: \.gitkeep$
