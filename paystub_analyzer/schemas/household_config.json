@@ -1,0 +1,71 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://github.com/project-paystub-analyzer/schemas/household_config.json",
+    "title": "Household Configuration",
+    "description": "Configuration for multi-filer household analysis.",
+    "type": "object",
+    "required": [
+        "version",
+        "household_id",
+        "filers"
+    ],
+    "additionalProperties": false,
+    "properties": {
+        "version": {
+            "type": "string",
+            "pattern": "^0\\.2\\.\\d+$"
+        },
+        "household_id": {
+            "type": "string",
+            "minLength": 1
+        },
+        "filers": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "role",
+                    "sources"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "pattern": "^[a-zA-Z0-9_-]+$"
+                    },
+                    "role": {
+                        "type": "string",
+                        "enum": [
+                            "PRIMARY",
+                            "SPOUSE"
+                        ]
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "sources": {
+                        "type": "object",
+                        "required": [
+                            "paystubs_dir"
+                        ],
+                        "properties": {
+                            "paystubs_dir": {
+                                "type": "string"
+                            },
+                            "w2_files": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    }
+}

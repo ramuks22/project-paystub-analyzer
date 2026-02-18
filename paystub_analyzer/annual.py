@@ -696,14 +696,26 @@ def filing_checklist(tax_year: int, states: list[str]) -> list[dict[str, str]]:
     return checklist
 
 
-def build_tax_filing_package(
+def analyze_filer(
     tax_year: int,
     snapshots: list[PaystubSnapshot],
     tolerance: Decimal,
     w2_data: dict[str, Any] | None,
+    filer_id: str,
+    role: str,
 ) -> dict[str, Any]:
+    """
+    Analyze a single filer's paystubs and W-2s.
+    Returns a dictionary with 'public' (filer report object) and 'internal' (ledger/meta).
+    """
     if not snapshots:
-        raise ValueError("No snapshots available to build filing package.")
+        # If no snapshots, we can't really analyze much, but might have W-2?
+        # For now, matching existing logic: raise ValueError if no paystubs.
+        # But for spouses, they might have 0 income?
+        # RFC says "Every paystub... strictly owned".
+        # If a filer is defined but has no docs, they might be empty.
+        # But existing logic raises ValueError. Let's keep strict for now.
+        raise ValueError(f"No snapshots available for filer {filer_id}.")
 
     verified_snapshots, ytd_repair_issues, verification_notes_by_file = verify_and_repair_state_ytd_anomalies(
         snapshots,
@@ -736,7 +748,6 @@ def build_tax_filing_package(
 
     # New Filing Mode Safety Check
     from paystub_analyzer.filing_rules import validate_filing_safety
-    from paystub_analyzer.utils.contracts import validate_output
 
     filing_safety = validate_filing_safety(
         extracted_data=extracted_summary(final_snapshot),
@@ -756,45 +767,189 @@ def build_tax_filing_package(
             return int(round(x["ytd"] * 100))
         return 0
 
-    primary_filer = {
-        "id": "primary",
-        "role": "PRIMARY",
+    state_tax_cents = {k: to_cents(v) for k, v in extracted["state_income_tax"].items()}
+
+    filer_report = {
+        "id": filer_id,
+        "role": role,
         "gross_pay_cents": to_cents(extracted["gross_pay"]),
         "fed_tax_cents": to_cents(extracted["federal_income_tax"]),
-        "state_tax_by_state_cents": {k: to_cents(v) for k, v in extracted["state_income_tax"].items()},
-        "status": "MATCH" if ready_to_file else "REVIEW_NEEDED",  # Simplified status logic for now
+        "state_tax_by_state_cents": state_tax_cents,
+        "status": "MATCH" if ready_to_file else "REVIEW_NEEDED",
         "audit_flags": [err for err in filing_safety.errors] + [warn for warn in filing_safety.warnings],
     }
 
-    # In v0.2.0, single filer means household totals == primary totals
-    public_report: dict[str, Any] = {
-        "schema_version": "0.2.0",
-        "household_summary": {
-            "total_gross_pay_cents": primary_filer["gross_pay_cents"],
-            "total_fed_tax_cents": primary_filer["fed_tax_cents"],
-            "ready_to_file": ready_to_file,
+    return {
+        "public": filer_report,
+        "internal": {
+            "report": filer_report,  # Legacy prop for single-return compat
+            "ledger": ledger,
+            "meta": {
+                "tax_year": tax_year,
+                "paystub_count_raw": len(snapshots),
+                "paystub_count_canonical": len(canonical_snapshots),
+                "latest_pay_date": final_snapshot.pay_date,
+                "latest_paystub_file": final_snapshot.file,
+                "extracted": extracted,
+                "authenticity_score": assessment["score"],
+                "filing_safety": filing_safety._asdict(),
+                "consistency_issues": [issue.__dict__ for issue in issues],
+                "comparisons": comparisons,
+                "comparison_summary": comparison_summary,
+            },
         },
-        "filers": [primary_filer],
+    }
+
+
+def build_household_package(
+    household_config: dict[str, Any],
+    tax_year: int,
+    snapshot_loader: Callable[[dict[str, Any]], list[PaystubSnapshot]],
+    w2_loader: Callable[[dict[str, Any]], dict[str, Any] | None],
+    tolerance: Decimal,
+) -> dict[str, Any]:
+    """
+    Orchestrate household analysis.
+    snapshot_loader: fn(source_config) -> list[snapshots]
+    w2_loader: fn(source_config) -> w2_data OR None
+    """
+    filers = household_config["filers"]
+
+    # 1. Validation: Cardinality
+    roles = [f["role"] for f in filers]
+    if roles.count("PRIMARY") != 1:
+        raise ValueError("Household must have exactly one PRIMARY filer.")
+    if roles.count("SPOUSE") > 1:
+        raise ValueError("Household can have at most one SPOUSE filer.")
+
+    # 2. Duplicate Source Detection (Global)
+    # This requires looking at the loaded snapshots or paths BEFORE processing?
+    # Or we trust the loader to give us paths.
+    # The loader is called per filer. We can track paths seen.
+    seen_paths: dict[str, str] = {}  # path -> filer_id
+
+    results = []
+
+    total_gross = 0
+    total_fed = 0
+    all_ready = True
+
+    for filer in filers:
+        filer_id = filer["id"]
+        role = filer["role"]
+        sources = filer["sources"]
+
+        # Load data
+        snapshots = snapshot_loader(sources)
+        w2_data = w2_loader(sources)
+
+        # 3. Check for shared files
+        for s in snapshots:
+            if s.file in seen_paths:
+                other = seen_paths[s.file]
+                raise ValueError(f"File '{s.file}' is claimed by both '{other}' and '{filer_id}'.")
+            seen_paths[s.file] = filer_id
+
+        # Analyze
+        analysis = analyze_filer(
+            tax_year=tax_year,
+            snapshots=snapshots,
+            tolerance=tolerance,
+            w2_data=w2_data,
+            filer_id=filer_id,
+            role=role,
+        )
+
+        filer_public = analysis["public"]
+        results.append(analysis)
+
+        # Aggregation
+        total_gross += filer_public["gross_pay_cents"]
+        total_fed += filer_public["fed_tax_cents"]
+
+        status = filer_public["status"]
+        if status != "MATCH":
+            all_ready = False
+
+    household_summary = {
+        "total_gross_pay_cents": total_gross,
+        "total_fed_tax_cents": total_fed,
+        "ready_to_file": all_ready,
+    }
+
+    public_report = {
+        "schema_version": "0.2.0",
+        "household_summary": household_summary,
+        "filers": [r["public"] for r in results],
     }
 
     # Validate Contract
+    from paystub_analyzer.utils.contracts import validate_output
+
     validate_output(public_report, "annual_summary", mode="FILING")
 
-    # Return composite internal package
+    # Composite return (list of internal results + aggregate report)
     return {
         "report": public_report,
-        "ledger": ledger,
-        "meta": {
-            "tax_year": tax_year,
-            "paystub_count_raw": len(snapshots),
-            "paystub_count_canonical": len(canonical_snapshots),
-            "latest_pay_date": final_snapshot.pay_date,
-            "latest_paystub_file": final_snapshot.file,
-            "extracted": extracted,
-            "authenticity_score": assessment["score"],
-            "filing_safety": filing_safety._asdict(),
-            "consistency_issues": [issue.__dict__ for issue in issues],
+        "filers_analysis": results,
+    }
+
+
+# Legacy wrapper for backward compatibility
+def build_tax_filing_package(
+    tax_year: int,
+    snapshots: list[PaystubSnapshot],
+    tolerance: Decimal,
+    w2_data: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """
+    Detailed single-filer analysis (Legacy Entry Point).
+    Wraps analyze_filer but formats return to match old contract expected by CLI currently.
+    """
+    analysis = analyze_filer(
+        tax_year=tax_year,
+        snapshots=snapshots,
+        tolerance=tolerance,
+        w2_data=w2_data,
+        filer_id="primary",
+        role="PRIMARY",
+    )
+
+    # Re-construct the legacy composite package structure
+    # The new analyze_filer returns {'public': ..., 'internal': ...}
+    # The old build_tax_filing_package returned the internal dict directly + report embedded?
+    # Actually, look at the old code: it returned:
+    # { "report": public_report, "ledger": ledger, "meta": meta }
+    # My new analyze_filer 'internal' key contains exactly this structure!
+
+    internal = analysis["internal"]
+
+    # But wait, 'public_report' inside analyze_filer is just the filer report (dict),
+    # whereas 'report' in the old return was the full {household_summary, filers: []} structure
+    # constructed at the end.
+
+    # We need to wrap the single filer report into a household report to match v0.2.0 output requirement
+    filer_report = analysis["public"]
+
+    public_report = {
+        "schema_version": "0.2.0",
+        "household_summary": {
+            "total_gross_pay_cents": filer_report["gross_pay_cents"],
+            "total_fed_tax_cents": filer_report["fed_tax_cents"],
+            "ready_to_file": filer_report["status"] == "MATCH",
         },
+        "filers": [filer_report],
+    }
+
+    # Validate Contract
+    from paystub_analyzer.utils.contracts import validate_output
+
+    validate_output(public_report, "annual_summary", mode="FILING")
+
+    return {
+        "report": public_report,
+        "ledger": internal["ledger"],
+        "meta": internal["meta"],
     }
 
 
