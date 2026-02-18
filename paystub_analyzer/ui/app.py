@@ -170,6 +170,7 @@ div[data-baseweb="input"] input:disabled {
 }
 
 /* Button Styling Fixes */
+/* Button Styling Fixes */
 div.stButton > button {
     width: auto !important; /* Prevent full width by default */
     min-width: 140px; /* Minimum width for consistency */
@@ -184,7 +185,15 @@ div.stButton > button {
     padding-bottom: 0.5rem !important;
 }
 
+div.stButton > button > div,
+div.stButton > button > div > p {
+    line-height: 1 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
 /* Fix for number input step buttons getting stuck in active state color */
+/* We target the container of the spin buttons if possible, or the buttons themselves */
 button[data-baseweb="spinbutton"] {
     background-color: transparent !important;
     color: var(--text-primary) !important;
@@ -195,10 +204,18 @@ button[data-baseweb="spinbutton"]:hover {
     color: var(--brand-primary) !important;
 }
 button[data-baseweb="spinbutton"]:active,
-button[data-baseweb="spinbutton"]:focus {
+button[data-baseweb="spinbutton"]:focus,
+button[data-baseweb="spinbutton"]:focus-visible,
+div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"] {
+    background-color: transparent !important;
+    color: var(--text-primary) !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+/* Re-apply hover capability even when parent has focus */
+div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"]:hover {
     background-color: var(--bg-subtle) !important;
     color: var(--brand-primary) !important;
-    box-shadow: none !important; /* Remove stuck focus ring if any */
 }
 
 /* Primary Button (Build Packet, Extract, etc.) */

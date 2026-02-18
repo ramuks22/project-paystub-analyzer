@@ -1,8 +1,6 @@
 import pytest
-import sys
 import shutil
 import json
-from pathlib import Path
 from unittest.mock import patch
 from paystub_analyzer.cli.annual import main as annual_main
 

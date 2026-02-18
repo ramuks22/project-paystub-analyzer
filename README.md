@@ -43,7 +43,7 @@ Default folders:
 1. Install dependencies:
 
 ```bash
-python3 -m pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
 2. Ensure `tesseract` is installed and available in `PATH`.
