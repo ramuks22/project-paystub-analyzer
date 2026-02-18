@@ -1,4 +1,3 @@
-import logging
 import unittest
 from decimal import Decimal
 from pathlib import Path

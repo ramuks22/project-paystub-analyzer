@@ -3,6 +3,7 @@ from unittest.mock import patch
 import json
 from paystub_analyzer.cli.annual import main as annual_main
 
+
 @pytest.fixture
 def mock_ocr_text():
     return """
@@ -15,6 +16,7 @@ def mock_ocr_text():
     VA State Income Tax  200.00  2,400.00
     401(K) Contrib  500.00  6,000.00
     """
+
 
 @pytest.mark.e2e
 def test_annual_cli_pipeline(mock_ocr_text, tmp_path, capsys):
@@ -33,13 +35,15 @@ def test_annual_cli_pipeline(mock_ocr_text, tmp_path, capsys):
 
     # 2. Mock OCR to return text parseable by core.py
     with patch("paystub_analyzer.core.ocr_first_page", return_value=mock_ocr_text):
-        
         # 3. Invoke CLI
         test_args = [
             "paystub-annual",
-            "--year", "2025",
-            "--paystubs-dir", str(paystubs_dir),
-            "--package-json-out", str(output_json),
+            "--year",
+            "2025",
+            "--paystubs-dir",
+            str(paystubs_dir),
+            "--package-json-out",
+            str(output_json),
         ]
 
         with patch("sys.argv", test_args):

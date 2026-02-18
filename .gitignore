@@ -31,4 +31,9 @@ private_notes/
 *.key
 *.p12
 *.pfx
-*.crt
+
+# Packaging / Build Artifacts
+build/
+dist/
+*.egg-info/
+blackbox-reports/
