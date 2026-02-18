@@ -171,9 +171,11 @@ div[data-baseweb="input"] input:disabled {
 
 /* Button Styling Fixes */
 /* Button Styling Fixes */
+/* Button Styling Fixes */
 div.stButton > button {
-    width: auto !important; /* Prevent full width by default */
-    min-width: 140px; /* Minimum width for consistency */
+    width: auto !important;
+    min-width: 140px;
+    min_height: 2.5rem !important; /* Explicit height control */
     border-radius: 6px;
     font-weight: 600;
     transition: all 0.2s ease;
@@ -185,6 +187,7 @@ div.stButton > button {
     padding-bottom: 0.5rem !important;
 }
 
+/* Reset inner text elements for deterministic alignment */
 div.stButton > button > div,
 div.stButton > button > div > p {
     line-height: 1 !important;
@@ -192,8 +195,7 @@ div.stButton > button > div > p {
     padding: 0 !important;
 }
 
-/* Fix for number input step buttons getting stuck in active state color */
-/* We target the container of the spin buttons if possible, or the buttons themselves */
+/* Spinbutton Fixes: Neutral focus ring for A11Y, no stuck colors */
 button[data-baseweb="spinbutton"] {
     background-color: transparent !important;
     color: var(--text-primary) !important;
@@ -203,38 +205,52 @@ button[data-baseweb="spinbutton"]:hover {
     background-color: var(--bg-subtle) !important;
     color: var(--brand-primary) !important;
 }
-button[data-baseweb="spinbutton"]:active,
-button[data-baseweb="spinbutton"]:focus,
-button[data-baseweb="spinbutton"]:focus-visible,
-div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"] {
+button[data-baseweb="spinbutton"]:focus-visible {
+    outline: 2px solid var(--text-primary) !important;
+    outline-offset: -2px;
+    background-color: var(--bg-subtle) !important;
+    box-shadow: none !important;
+}
+/* Prevent "stuck" active color when parent input has focus, unless hovering */
+div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"]:not(:hover):not(:focus-visible) {
     background-color: transparent !important;
     color: var(--text-primary) !important;
     box-shadow: none !important;
-    outline: none !important;
-}
-/* Re-apply hover capability even when parent has focus */
-div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"]:hover {
-    background-color: var(--bg-subtle) !important;
-    color: var(--brand-primary) !important;
 }
 
-/* Primary Button (Build Packet, Extract, etc.) */
-div.stButton > button[kind="primary"],
-div.stButton > button[kind="primary"]:focus,
-div.stButton > button[kind="primary"]:active {
+/* Primary Button High Contrast */
+div.stButton > button[kind="primary"] {
   background-color: var(--brand-primary) !important;
-  color: #ffffff !important; /* Force white text */
+  color: #ffffff !important;
   border: 1px solid var(--brand-primary) !important;
 }
-
-div.stButton > button[kind="primary"]:hover {
+div.stButton > button[kind="primary"]:hover,
+div.stButton > button[kind="primary"]:focus {
   background-color: var(--brand-primary-hover) !important;
   border-color: var(--brand-primary-hover) !important;
   color: #ffffff !important;
 }
+div.stButton > button[kind="primary"]:active {
+  background-color: var(--brand-primary) !important;
+  color: #ffffff !important;
+}
 
-/* Secondary Button (Standard actions) */
+/* Secondary Button Contrast */
 div.stButton > button[kind="secondary"] {
+  background-color: transparent !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--text-tertiary) !important;
+}
+div.stButton > button[kind="secondary"]:hover {
+  border-color: var(--brand-primary) !important;
+  color: var(--brand-primary) !important;
+}
+
+/* Tooltip Visibility */
+div[data-testid="stTooltipContent"] {
+    background-color: #333333 !important;
+    color: #ffffff !important;
+}
   background-color: var(--bg-surface) !important;
   color: var(--text-primary) !important;
   border: 1px solid var(--border-strong) !important;
