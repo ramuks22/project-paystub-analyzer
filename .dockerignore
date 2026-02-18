@@ -1,0 +1,33 @@
+# Version Control
+.git
+.gitignore
+
+# Python / Environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+.env
+.DS_Store
+
+# Build Artifacts
+build/
+dist/
+*.egg-info/
+
+# Tests & Quality
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+tests/
+
+# Sensitive Data (PII)
+pay_statements/
+w2_forms/
+!w2_forms/*template*.json
+private_notes/
+reports/
+blackbox-reports/

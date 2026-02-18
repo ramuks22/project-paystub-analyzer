@@ -8,6 +8,7 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
       - id: check-merge-conflict
+      - id: check-json
 
   # Linting & Formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -37,7 +38,7 @@ repos:
         name: Forbid Sensitive JSON (W2 logic)
         entry: JSON files in w2_forms/ must be templates. Real W2 data is forbidden.
         language: fail
-        files: ^paystub_analyzer/w2_forms/.*\.json$
+        files: ^w2_forms/.*\.json$
         exclude: .*template.*\.json$|^tests/.*
 
       - id: forbid-paystubs-data
