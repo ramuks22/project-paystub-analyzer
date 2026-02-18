@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+.venv/
+venv/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Sensitive tax/source documents
+*.pdf
+pay_statements/
+w2_forms/*.pdf
+w2_forms/*.json
+!w2_forms/*template*.json
+!w2_forms/README.md
+
+# Generated analysis outputs that may contain personal tax data
+reports/
+private_notes/
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt

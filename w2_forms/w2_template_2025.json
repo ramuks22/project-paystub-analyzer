@@ -1,0 +1,21 @@
+{
+  "tax_year": 2025,
+  "box_1_wages_tips_other_comp": 0.0,
+  "box_2_federal_income_tax_withheld": 0.0,
+  "box_3_social_security_wages": 0.0,
+  "box_4_social_security_tax_withheld": 0.0,
+  "box_5_medicare_wages_and_tips": 0.0,
+  "box_6_medicare_tax_withheld": 0.0,
+  "state_boxes": [
+    {
+      "state": "AZ",
+      "box_16_state_wages_tips": 0.0,
+      "box_17_state_income_tax": 0.0
+    },
+    {
+      "state": "VA",
+      "box_16_state_wages_tips": 0.0,
+      "box_17_state_income_tax": 0.0
+    }
+  ]
+}

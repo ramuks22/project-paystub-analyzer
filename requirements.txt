@@ -1,0 +1,2 @@
+pypdfium2>=5.4.0
+streamlit>=1.42.0
