@@ -79,45 +79,48 @@ def main() -> None:
         description="Build annual paystub ledger, W-2 authenticity check, and filing packet."
     )
     parser.add_argument("--paystubs-dir", default="pay_statements", help="Directory with paystub PDFs.")
-    parser.add_argument("--year", type=int, required=True, help="Tax year to analyze.")
+    parser.add_argument("--year", type=int, help="Tax year to analyze (prompted if interactive).")
     parser.add_argument("--w2-json", type=Path, default=None, help="Optional W-2 JSON for cross-verification.")
-    parser.add_argument("--w2-pdf", type=Path, default=None, help="Optional W-2 PDF for OCR-based cross-verification.")
+    parser.add_argument("--w2-pdf", type=Path, default=None, help="Optional W-2 PDF for cross-verification.")
     parser.add_argument("--render-scale", type=float, default=2.8, help="OCR render scale.")
-    parser.add_argument("--w2-render-scale", type=float, default=3.0, help="W-2 OCR render scale when using --w2-pdf.")
-    parser.add_argument("--tolerance", type=Decimal, default=Decimal("0.01"), help="Comparison tolerance in dollars.")
-    parser.add_argument(
-        "--ledger-csv-out",
-        type=Path,
-        default=None,
-        help="CSV output path for chronological ledger.",
-    )
-    parser.add_argument(
-        "--package-json-out",
-        type=Path,
-        default=None,
-        help="JSON output path for filing package.",
-    )
-    parser.add_argument(
-        "--package-md-out",
-        type=Path,
-        default=None,
-        help="Markdown output path for filing package.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Generate package even if safety checks fail (exit code will still be non-zero unless suppressed).",
-    )
-    parser.add_argument(
-        "--household-config",
-        type=Path,
-        default=None,
-        help="Path to household configuration JSON (v0.2.0 specific).",
-    )
-    # ... (rest of args)
+    parser.add_argument("--w2-render-scale", type=float, default=3.0, help="W-2 OCR render scale.")
+    parser.add_argument("--tolerance", type=Decimal, default=Decimal("0.01"), help="Comparison tolerance.")
+    parser.add_argument("--ledger-csv-out", type=Path, default=None, help="CSV output path.")
+    parser.add_argument("--package-json-out", type=Path, default=None, help="JSON output path.")
+    parser.add_argument("--package-md-out", type=Path, default=None, help="Markdown output path.")
+    parser.add_argument("--force", action="store_true", help="Generate even if checks fail.")
+    parser.add_argument("--household-config", type=Path, default=None, help="Household config JSON.")
+    parser.add_argument("--interactive", action="store_true", help="Enable interactive prompts.")
+
     args = parser.parse_args()
 
-    # Determine Output Paths (Defaults or Custom)
+    # Interactive Prompts
+    from paystub_analyzer.utils import console
+
+    if args.interactive:
+        if not console.is_interactive():
+            console.print_warning("Interactive mode requested but not in TTY. Proceeding with defaults.")
+        else:
+            if not args.year:
+                try:
+                    val = console.ask_input("Tax Year", required=True)
+                    args.year = int(val)
+                except ValueError:
+                    console.print_error("Year must be an integer.", exit_code=1)
+
+            if not args.household_config:
+                # Check if user wants to use config or legacy
+                use_config = console.ask_confirm("Use Household Config file?", default=True)
+                if use_config:
+                    path_str = console.ask_input("Household Config Path", default="household_config.json")
+                    args.household_config = Path(path_str)
+                # Else fall through to legacy legacy logic
+
+    # Validation
+    if not args.year:
+        console.print_error("argument --year is required", exit_code=2)
+
+    # Determine Output Paths
     ledger_csv_out = args.ledger_csv_out or Path(f"reports/paystub_ledger_{args.year}.csv")
     package_json_out = args.package_json_out or Path(f"reports/tax_filing_package_{args.year}.json")
     package_md_out = args.package_md_out or Path(f"reports/tax_filing_package_{args.year}.md")
@@ -128,35 +131,28 @@ def main() -> None:
     household_config: dict[str, Any]
     base_dir: Path
 
+    console.print_step("Configuration")
+
     if args.household_config:
         if not args.household_config.exists():
-            sys.exit(f"Error: Household config file not found: {args.household_config}")
+            console.print_error(f"Household config file not found: {args.household_config}", exit_code=1)
         household_config = read_json(args.household_config)
-        # Validate Input Contract (Week 5 Cleanup)
+        # Validate Input Contract
         try:
             validate_output(household_config, "household_config", mode="FILING")
         except Exception as e:
-            sys.exit(f"Invalid household configuration: {e}")
+            console.print_error(f"Invalid household configuration: {e}", exit_code=1)
 
         base_dir = args.household_config.parent
+        console.print_success(f"Loaded config: {args.household_config}")
     else:
-        # Legacy Mode: Synthesize checks
+        # Legacy Mode
         if not Path(args.paystubs_dir).exists():
-            sys.exit(f"Error: Paystubs directory not found: {args.paystubs_dir}")
+            console.print_error(f"Paystubs directory not found: {args.paystubs_dir}", exit_code=1)
         if args.w2_json and args.w2_pdf:
-            sys.exit("Use either --w2-json or --w2-pdf, not both.")
+            console.print_error("Use either --w2-json or --w2-pdf, not both.", exit_code=1)
 
-        # Synthesize Config
-        w2_files = []
-        if args.w2_pdf:
-            w2_files.append(str(args.w2_pdf))
-        elif args.w2_json:
-            # Note: w2_json is data, not a file path to be loaded by the PDF loader.
-            # But our loader logic below handles w2_json/w2_pdf duality via CLI args injection if needed?
-            # Actually, `build_household_package` takes a `w2_loader` callback.
-            # We can handle the `w2_json` data passing via that closure.
-            pass
-
+        w2_files = [str(args.w2_pdf)] if args.w2_pdf else []
         household_config = {
             "version": "0.2.0",
             "household_id": "legacy_implicit",
@@ -172,8 +168,9 @@ def main() -> None:
             ],
         }
         base_dir = Path.cwd()
+        console.print_success("Using legacy implicit configuration.")
 
-    # Define Loaders
+    # Define Loaders (omitted changes here as they are internal logic)
     def snapshot_loader(source_cfg: dict[str, Any]) -> list[Any]:
         d = base_dir / source_cfg["paystubs_dir"]
         if not d.exists():
@@ -186,43 +183,19 @@ def main() -> None:
         )
 
     def w2_loader(source_cfg: dict[str, Any]) -> dict[str, Any] | None:
-        # 1. Custom explicit JSON arg (Legacy Override)
         if not args.household_config and args.w2_json:
             return read_json(args.w2_json)
-
-        # 2. Config-based W-2s (PDFs)
-        # We only support PDF W-2 extraction from config currently as per schema 'w2_files'
         files = source_cfg.get("w2_files", [])
         if not files:
             return None
-
-        # If multiple W-2s, we need to merge them?
-        # RFC says "Enable... multiple income earners".
-        # But for a single filer, multiple W-2s are aggregated?
-        # Current logic `w2_pdf_to_json_payload` handles one file.
-        # We will take the first one or throw if multiple (scope limitation for now).
-        # "Strict: Multi-W2 Supported via w2_files array."
-        # If we have multiple, we need to merge them.
-        # ALLOWANCE: For Task 23, we will error if > 1 W-2 per filer until merge logic exists,
-        # OR just process the first one.
-        # Given "Multi-W2 Supported", I should probably loop.
-        # But `compare_snapshot_to_w2` expects ONE w2_data dict.
-        # Implementation Detail: If len > 1, we fail or merge.
-        # Let's fail hard on > 1 for now to be safe, or just take first.
-        # Fail hard is better than silent ignore.
         if len(files) > 1:
-            raise NotImplementedError("Multiple W-2 files per filer not yet supported in aggregation.")
-
+            raise NotImplementedError("Multiple W-2 files per filer not supported.")
         fpath = base_dir / files[0]
-        return w2_pdf_to_json_payload(
-            pdf_path=fpath,
-            render_scale=args.w2_render_scale,
-            psm=6,
-            fallback_year=args.year,
-        )
+        return w2_pdf_to_json_payload(fpath, args.w2_render_scale, 6, args.year)
 
     from paystub_analyzer.annual import build_household_package
 
+    console.print_step("Analysis")
     try:
         composite_result = build_household_package(
             household_config=household_config,
@@ -232,94 +205,70 @@ def main() -> None:
             tolerance=args.tolerance,
         )
     except Exception as e:
-        sys.exit(f"Error building package: {e}")
+        console.print_error(f"Error building package: {e}", exit_code=1)
 
     report = composite_result["report"]
     filers_analysis = composite_result["filers_analysis"]
 
-    # In Legacy Mode (implicit config), we want to behave exactly as before.
-    # The `report` is the new v0.2.0 household format.
-    # But print statements should reflect the primary filer or household.
-
-    # Check safety (Global)
+    # Check Safety
     ready = report["household_summary"]["ready_to_file"]
-
-    # We need to print safety checks for ALL filers
     safety_failed_any = False
+
     for analysis in filers_analysis:
         internal = analysis["internal"]
         meta = internal["meta"]
         safety = meta.get("filing_safety", {})
         if not safety.get("passed", False):
             safety_failed_any = True
-            print(f"\n!!!!!! FILER: {analysis['public']['id']} ({analysis['public']['role']}) SAFETY FAILED !!!!!!")
+            fid = f"{analysis['public']['id']} ({analysis['public']['role']})"
+            console.print_error(f"FILER: {fid} SAFETY FAILED")
             for err in safety.get("errors", []):
                 print(f"- [BLOCKING] {err}")
 
     if safety_failed_any:
-        print("\n")
+        print("")
         if not args.force:
-            print("Aborting generation. Use --force to override.")
-            sys.exit(1)
+            console.print_error("Aborting generation. Use --force to override.", exit_code=1)
         else:
-            print("WARNING: Generating package despite failures due to --force flag.")
+            console.print_warning("Generating package despite failures due to --force flag.")
 
     # Write Outputs
-    # We only have one set of output flags (--ledger-csv-out etc).
-    # If multiple filers, we might overwrite or need suffixes.
-    # Legacy behavior: 1 filer.
-    # If household mode, we should likely create separate ledgers?
-    # RFC doesn't specify CLI output file structure for multiple ledgers.
-    # Assumption: if 1 filer, use exact paths. If >1, append suffix.
-
     for analysis in filers_analysis:
         filer_id = analysis["public"]["id"]
         internal = analysis["internal"]
-
         suffix = "" if len(filers_analysis) == 1 else f"_{filer_id}"
-
-        # Ledger
         ledger_path = ledger_csv_out
         if suffix:
             ledger_path = ledger_csv_out.parent / f"{ledger_csv_out.stem}{suffix}{ledger_csv_out.suffix}"
-
         write_ledger_csv(ledger_path, internal["ledger"])
-        print(f"Ledger CSV ({filer_id}): {ledger_path}")
 
+    # Write JSON/MD
     write_json(package_json_out, report)
-    # Markdown -> we can't easily use package_to_markdown on the whole household yet
-    # as it expects a single filer structure?
-    # Actually package_to_markdown takes the 'package' (which was single filer).
-    # We should update package_to_markdown to handle household OR render primary?
-    # Backward compat: render Primary.
-    # But ideally render all.
-    # For now, let's render the PRIMARY filer's report using the old tool,
-    # or if we have time, update package_to_markdown.
-    # Given strict constraints, let's render the Primary filer's markdown
-    # to satisfy "legacy paystub-annual args... produce same functional behavior".
-
-    # primary_analysis = next(f for f in filers_analysis if f["public"]["role"] == "PRIMARY")
-    # package_to_markdown expects the 'public' dict structure of a filer?
-    # No, it expects the OLD 'package' structure which had 'household_summary' inside it?
-    # Wait, the OLD public report HAD 'household_summary' and 'filers'.
-    # So `package_to_markdown` SHOULD work on the new `report` object IF it matches the schema.
-    # In v0.2.0, `household_summary` is at root.
-    # So we can pass `report` directly.
-
     try:
         write_markdown(package_md_out, package_to_markdown(report))
-        print(f"Package Markdown: {package_md_out}")
     except Exception as e:
-        print(f"Warning: Could not generate markdown: {e}")
+        console.print_warning(f"Could not generate markdown: {e}")
 
-    write_json(package_json_out, report)
-    print(f"Package JSON: {package_json_out}")
+    # Final Summary Table
+    console.print_step("Summary")
 
-    # Print Summary to Console (Primary or Aggregate)
-    print("-" * 40)
-    print(f"Household Ready: {ready}")
-    print(f"Gross Pay: {format_money(Decimal(report['household_summary']['total_gross_pay_cents']) / 100)}")
-    print(f"Fed Tax:   {format_money(Decimal(report['household_summary']['total_fed_tax_cents']) / 100)}")
+    summary_rows = [
+        ["Household Ready", str(ready)],
+        ["Gross Pay", format_money(Decimal(report["household_summary"]["total_gross_pay_cents"]) / 100)],
+        ["Fed Tax", format_money(Decimal(report["household_summary"]["total_fed_tax_cents"]) / 100)],
+    ]
+    console.print_table("Household Totals", ["Metric", "Value"], summary_rows)
+
+    # Outputs List
+    console.print_table(
+        "Generated Artifacts",
+        ["Type", "Path"],
+        [
+            ["Package JSON", str(package_json_out)],
+            ["Package Markdown", str(package_md_out)],
+            ["Ledger CSV(s)", str(ledger_csv_out.parent)],
+        ],
+    )
 
     if safety_failed_any and not args.force:
         sys.exit(1)

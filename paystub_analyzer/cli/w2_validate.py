@@ -175,6 +175,7 @@ def main() -> None:
     snapshot = extract_paystub_snapshot(latest_file, render_scale=args.render_scale)
 
     from paystub_analyzer.utils.contracts import validate_output
+    from paystub_analyzer.utils import console
 
     extracted = snapshot_to_payload(snapshot)
 
@@ -186,7 +187,7 @@ def main() -> None:
     }
 
     if args.w2_json and args.w2_pdf:
-        raise SystemExit("Use either --w2-json or --w2-pdf, not both.")
+        console.print_error("Use either --w2-json or --w2-pdf, not both.", exit_code=1)
 
     w2_data = None
     if args.w2_json:
@@ -201,6 +202,18 @@ def main() -> None:
 
     comparisons: list[dict[str, Any]] = []
     summary: dict[str, Any] = {}
+
+    console.print_step("Extraction Summary")
+
+    extraction_rows = [
+        ["Latest Paystub", f"{latest_file.name} ({latest_date.isoformat()})"],
+        ["Federal Tax YTD", format_money(snapshot.federal_income_tax.ytd)],
+        ["State Tax YTD", format_money(sum_state_ytd(snapshot.state_income_tax))],
+    ]
+    for state in sorted(snapshot.state_income_tax):
+        extraction_rows.append([f"  {state} Tax YTD", format_money(snapshot.state_income_tax[state].ytd)])
+
+    console.print_table("Paystub Values", ["Metric", "Value"], extraction_rows)
 
     if w2_data:
         comparisons, summary = compare_snapshot_to_w2(snapshot, w2_data, args.tolerance)
@@ -218,14 +231,6 @@ def main() -> None:
             return int(round(x * 100)) if isinstance(x, (int, float, Decimal)) else 0
 
         for row in comparisons:
-            # We only care about rows with a difference or mismatch for the discrepancies list?
-            # Schema says "discrepancies" (plural). Usually implies things that don't match.
-            # But the schema requires 'field', 'paystub_value_cents', 'w2_value_cents', 'diff_cents'.
-            # Let's include everything that has a non-zero difference?
-            # Or should we include everything?
-            # Given "discrepancies", I'll include things where status is not MATCH.
-            # Fix(Week 5 P1): logic was filtering on uppercase "MATCH" but core returns lowercase.
-            # Also ensure we only report actual value differences.
             status = str(row.get("status", "")).lower()
             diff_cents_val = to_cents(row.get("difference"))
 
@@ -238,6 +243,18 @@ def main() -> None:
                         "diff_cents": diff_cents_val,
                     }
                 )
+
+        console.print_step("W-2 Comparison")
+        comp_rows = []
+        for r in comparisons:
+            # Shorten output for table
+            comp_rows.append(
+                [r["field"], str(r.get("paystub")), str(r.get("w2")), str(r.get("difference")), r.get("status")]
+            )
+
+        console.print_table("Detailed Comparison", ["Field", "Paystub", "W-2", "Diff", "Status"], comp_rows)
+
+        console.print_success(f"Match Status: {contract_payload['match_status']}")
 
     validate_output(contract_payload, "w2_comparison", mode="REVIEW")
 
@@ -258,13 +275,8 @@ def main() -> None:
 
     write_text(args.report_out, report_markdown(report_payload))
 
-    print(f"Latest paystub used: {latest_file} ({latest_date.isoformat()})")
-    print(f"Federal income tax YTD: {format_money(snapshot.federal_income_tax.ytd)}")
-    print(f"State income tax YTD total: {format_money(sum_state_ytd(snapshot.state_income_tax))}")
-    for state in sorted(snapshot.state_income_tax):
-        print(f"  {state}: {format_money(snapshot.state_income_tax[state].ytd)}")
-    print(f"Report written: {args.report_out}")
-    print(f"JSON written: {args.json_out}")
+    console.print_success(f"Report written: {args.report_out}")
+    console.print_success(f"JSON written: {args.json_out}")
 
 
 if __name__ == "__main__":

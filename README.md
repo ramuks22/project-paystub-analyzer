@@ -140,7 +140,51 @@ Outputs:
 
 Ledger CSV includes `ytd_verification` to show any parsed-vs-calculated mismatches or auto-corrections detected for a row.
 
-### 4) Convert W-2 PDF to JSON (optional)
+### 4) Household Filing (v0.2.0)
+
+Analyze multiple filers (Primary + Optional Spouse) together.
+
+**Configuration (`household_config.json`):**
+
+```json
+{
+  "version": "0.2.0",
+  "household_id": "smith_family_2025",
+  "filers": [
+    {
+      "id": "jane",
+      "role": "PRIMARY",
+      "sources": {
+        "paystubs_dir": "docs/jane/paystubs",
+        "w2_files": ["docs/jane/w2.pdf"]
+      }
+    },
+    {
+      "id": "john",
+      "role": "SPOUSE",
+      "sources": {
+        "paystubs_dir": "docs/john/paystubs"
+      }
+    }
+  ]
+}
+```
+
+**Run:**
+
+```bash
+paystub-annual --year 2025 --household-config household_config.json
+```
+
+**Interactive Mode:**
+
+If you prefer prompts instead of arguments:
+
+```bash
+paystub-annual --interactive
+```
+
+### 5) Convert W-2 PDF to JSON (optional)
 
 ```bash
 # Note context: standalone extraction script not exposed as CLI yet, use library or add script if needed.
