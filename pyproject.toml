@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "project-paystub-analyzer"
-version = "0.1.0-alpha.1"
+version = "0.2.0-alpha.1"
 description = "Analyze paystubs to extract annual tax data and validate against W-2s, and generates a filing packet."
 readme = "README.md"
 requires-python = ">=3.10"
