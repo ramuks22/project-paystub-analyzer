@@ -122,6 +122,8 @@ def main() -> None:
     package_json_out = args.package_json_out or Path(f"reports/tax_filing_package_{args.year}.json")
     package_md_out = args.package_md_out or Path(f"reports/tax_filing_package_{args.year}.md")
 
+    from paystub_analyzer.utils.contracts import validate_output
+
     # Construct Household Configuration
     household_config: dict[str, Any]
     base_dir: Path
@@ -130,6 +132,12 @@ def main() -> None:
         if not args.household_config.exists():
             sys.exit(f"Error: Household config file not found: {args.household_config}")
         household_config = read_json(args.household_config)
+        # Validate Input Contract (Week 5 Cleanup)
+        try:
+            validate_output(household_config, "household_config", mode="FILING")
+        except Exception as e:
+            sys.exit(f"Invalid household configuration: {e}")
+
         base_dir = args.household_config.parent
     else:
         # Legacy Mode: Synthesize checks
