@@ -88,16 +88,15 @@ div[data-testid="stVerticalBlock"] > div {
   position: sticky;
   top: 0;
   z-index: 90;
+  backdrop-filter: blur(4px);
 }
-[data-testid="stHeader"] > div {
-  position: relative;
-}
-[data-testid="stHeader"] > div::before {
-  content: "Paystub Truth Check";
-  position: absolute;
+
+/* Real fixed title in top app header row (next to Deploy/menu) */
+.app-topline-title {
+  position: fixed;
   left: 3rem;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0.62rem;
+  z-index: 120;
   font-size: 1.35rem;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -108,6 +107,14 @@ div[data-testid="stVerticalBlock"] > div {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
+}
+[data-testid="stSidebar"][aria-expanded="true"] + div .app-topline-title {
+  left: calc(300px + 1rem) !important;
+  max-width: calc(100vw - 300px - 12rem) !important;
+}
+[data-testid="stSidebar"][aria-expanded="false"] + div .app-topline-title {
+  left: 3rem !important;
+  max-width: calc(100vw - 12rem) !important;
 }
 
 [data-testid="stSidebar"] {
@@ -801,10 +808,18 @@ div[data-testid="stMainMenuPopover"] [role="link"]:focus-visible {
   color: #991b1b;
 }
 @media (max-width: 980px) {
-  [data-testid="stHeader"] > div::before {
+  .app-topline-title {
     left: 2.6rem;
     font-size: 1.1rem;
     max-width: calc(100vw - 11rem);
+  }
+  [data-testid="stSidebar"][aria-expanded="true"] + div .app-topline-title {
+    left: calc(300px + 0.6rem) !important;
+    max-width: calc(100vw - 300px - 9rem) !important;
+  }
+  [data-testid="stSidebar"][aria-expanded="false"] + div .app-topline-title {
+    left: 2.6rem !important;
+    max-width: calc(100vw - 9rem) !important;
   }
   .step-heading {
     flex-direction: column;
@@ -1529,6 +1544,7 @@ def main() -> None:
     st.set_page_config(page_title="Paystub Truth Check", page_icon="📄", layout="wide")
     reset_session_if_schema_changed()
     apply_theme()
+    st.markdown("<div class='app-topline-title'>Paystub Truth Check</div>", unsafe_allow_html=True)
 
     st.markdown(
         (
