@@ -27,7 +27,6 @@ tests/
 # Sensitive Data (PII)
 pay_statements/
 w2_forms/
-!w2_forms/*template*.json
 private_notes/
 reports/
 blackbox-reports/
