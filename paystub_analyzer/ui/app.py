@@ -7,10 +7,13 @@ import hashlib
 import io
 import json
 import tempfile
+import time
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+import pandas as pd
 import streamlit as st
 
 
@@ -31,7 +34,8 @@ from paystub_analyzer.annual import (
 from paystub_analyzer.w2 import build_w2_template, compare_snapshot_to_w2
 from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
-APP_SESSION_SCHEMA_VERSION = "2026-02-18-ui-contrast-and-ledger-v4"
+APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v2"
+ButtonKind = Literal["primary", "secondary", "tertiary"]
 
 
 def apply_theme() -> None:
@@ -54,6 +58,7 @@ def apply_theme() -> None:
   --brand-primary: #0f5d75;
   --brand-primary-hover: #0b4a5d;
   --brand-secondary: #d97324;
+  --button-width: 220px;
 
   --border-subtle: #dee2e6;
   --border-strong: #ced4da;
@@ -79,11 +84,116 @@ div[data-testid="stVerticalBlock"] > div {
 
 [data-testid="stHeader"] {
   background-color: rgba(255, 255, 255, 0.95);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 90;
+}
+[data-testid="stHeader"] > div {
+  position: relative;
+}
+[data-testid="stHeader"] > div::before {
+  content: "Paystub Truth Check";
+  position: absolute;
+  left: 3rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1;
+  max-width: calc(100vw - 15rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 [data-testid="stSidebar"] {
   background-color: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
+}
+
+/* Sidebar collapse/expand control visibility on light theme */
+[data-testid="stSidebarHeader"] {
+  background-color: var(--bg-surface) !important;
+  border-bottom: 1px solid var(--border-subtle);
+}
+[data-testid="stSidebarHeader"] button,
+[data-testid="stSidebarHeader"] [role="button"],
+[data-testid="stSidebarHeader"] button[kind="header"],
+[data-testid="stSidebarHeader"] button[aria-label*="sidebar" i],
+[data-testid="stSidebarHeader"] button[title*="sidebar" i],
+[data-testid="stSidebarCollapseButton"] button,
+[data-testid="stSidebarCollapseButton"] [role="button"],
+[data-testid="stExpandSidebarButton"],
+[data-testid="stExpandSidebarButton"] button,
+[data-testid="stExpandSidebarButton"] [role="button"],
+[data-testid="collapsedControl"] button,
+[data-testid="collapsedControl"] [role="button"] {
+  color: var(--text-primary) !important;
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+[data-testid="stSidebarHeader"] button svg,
+[data-testid="stSidebarHeader"] [role="button"] svg,
+[data-testid="stSidebarHeader"] button[kind="header"] svg,
+[data-testid="stSidebarCollapseButton"] button svg,
+[data-testid="stSidebarCollapseButton"] [role="button"] svg,
+[data-testid="stExpandSidebarButton"] svg,
+[data-testid="stExpandSidebarButton"] button svg,
+[data-testid="stExpandSidebarButton"] [role="button"] svg,
+[data-testid="collapsedControl"] button svg,
+[data-testid="collapsedControl"] [role="button"] svg {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+[data-testid="stSidebarHeader"] button *,
+[data-testid="stSidebarHeader"] [role="button"] *,
+[data-testid="stSidebarHeader"] button[kind="header"] *,
+[data-testid="stSidebarCollapseButton"] button *,
+[data-testid="stSidebarCollapseButton"] [role="button"] *,
+[data-testid="stExpandSidebarButton"] *,
+[data-testid="stExpandSidebarButton"] button *,
+[data-testid="stExpandSidebarButton"] [role="button"] *,
+[data-testid="collapsedControl"] button *,
+[data-testid="collapsedControl"] [role="button"] * {
+  color: var(--text-primary) !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+[data-testid="stSidebarHeader"] button:hover,
+[data-testid="stSidebarHeader"] button:focus-visible,
+[data-testid="stSidebarHeader"] [role="button"]:hover,
+[data-testid="stSidebarHeader"] [role="button"]:focus-visible,
+[data-testid="stSidebarHeader"] button[kind="header"]:hover,
+[data-testid="stSidebarHeader"] button[kind="header"]:focus-visible,
+[data-testid="stSidebarHeader"] button[aria-label*="sidebar" i]:hover,
+[data-testid="stSidebarHeader"] button[aria-label*="sidebar" i]:focus-visible,
+[data-testid="stSidebarHeader"] button[title*="sidebar" i]:hover,
+[data-testid="stSidebarHeader"] button[title*="sidebar" i]:focus-visible,
+[data-testid="stSidebarCollapseButton"] button:hover,
+[data-testid="stSidebarCollapseButton"] button:focus-visible,
+[data-testid="stSidebarCollapseButton"] [role="button"]:hover,
+[data-testid="stSidebarCollapseButton"] [role="button"]:focus-visible,
+[data-testid="stExpandSidebarButton"]:hover,
+[data-testid="stExpandSidebarButton"]:focus-visible,
+[data-testid="stExpandSidebarButton"] button:hover,
+[data-testid="stExpandSidebarButton"] button:focus-visible,
+[data-testid="stExpandSidebarButton"] [role="button"]:hover,
+[data-testid="stExpandSidebarButton"] [role="button"]:focus-visible,
+[data-testid="collapsedControl"] button:hover,
+[data-testid="collapsedControl"] button:focus-visible,
+[data-testid="collapsedControl"] [role="button"]:hover,
+[data-testid="collapsedControl"] [role="button"]:focus-visible {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-subtle) !important;
+  border-color: var(--border-strong) !important;
 }
 
 /* Typographic enhancements */
@@ -92,6 +202,54 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 700;
   letter-spacing: -0.02em;
   margin-bottom: 0.5rem !important; /* Tighten headers */
+}
+
+/* In-page intro under fixed header title */
+.app-intro {
+  margin: 0.25rem 0 0.6rem;
+}
+.app-intro p {
+  margin: 0 !important;
+  color: var(--text-secondary) !important;
+  font-size: 0.95rem !important;
+}
+
+/* Section heading treatment for Step blocks */
+.step-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.55rem 0.8rem;
+  margin: 0.2rem 0 0.45rem;
+  border: 1px solid #d5e3ea;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8fcff 0%, #f3f8fb 100%);
+}
+.step-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  height: 1.55rem;
+  border-radius: 9999px;
+  border: 1px solid #b8d0db;
+  background: #e8f2f7;
+  color: #0f5d75;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.step-copy h3 {
+  margin: 0 !important;
+  color: var(--text-primary);
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+}
+.step-copy p {
+  margin: 0.2rem 0 0 !important;
+  color: var(--text-secondary) !important;
+  font-size: 0.9rem !important;
 }
 
 /* Fix global text spilling into Tooltips or unexpected places */
@@ -140,7 +298,7 @@ div[data-baseweb="input"] > div {
   background-color: var(--bg-core) !important;
   border-color: var(--border-strong) !important;
   color: var(--text-primary) !important;
-  min-height: 38px; /* Standardize height */
+  min-height: 38px;
 }
 
 div[data-baseweb="input"] input,
@@ -150,14 +308,19 @@ div[data-baseweb="base-input"] input {
   -webkit-text-fill-color: var(--text-primary) !important;
   caret-color: var(--brand-primary) !important;
 }
+div[data-baseweb="input"] input:focus-visible,
+div[data-baseweb="base-input"] input:focus-visible,
+div[data-baseweb="select"] input:focus-visible,
+div[data-baseweb="select"] span:focus-visible {
+  outline: 2px solid var(--brand-primary) !important;
+  outline-offset: 1px;
+}
 
 /* Ensure labels are readable */
 label[data-baseweb="checkbox"] span,
 label[data-baseweb="radio"] span,
-.stTextInput label,
-.stNumberInput label,
-.stSelectbox label,
-.stFileUploader label {
+div[data-testid="stSidebar"] [data-testid="stWidgetLabel"],
+div[data-testid="stSidebar"] [data-testid="stWidgetLabel"] * {
   color: var(--text-primary) !important;
   font-size: 0.9rem !important;
   font-weight: 500 !important;
@@ -170,12 +333,21 @@ div[data-baseweb="input"] input:disabled {
 }
 
 /* Button Styling Fixes */
-/* Button Styling Fixes */
-/* Button Styling Fixes */
-div.stButton > button {
-    width: auto !important;
-    min-width: 140px;
-    min_height: 2.5rem !important; /* Explicit height control */
+div.stButton > button,
+div.stButton button,
+div[data-testid="stFormSubmitButton"] > button,
+div[data-testid="stFormSubmitButton"] button,
+div.stDownloadButton > button,
+div.stDownloadButton button,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stDownloadButton"] button,
+div[data-testid="stFileUploader"] button,
+div[data-testid="stFileUploaderDropzone"] button,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] {
+    width: var(--button-width) !important;
+    min-width: var(--button-width);
+    max-width: var(--button-width);
+    min-height: 2.5rem !important;
     border-radius: 6px;
     font-weight: 600;
     transition: all 0.2s ease;
@@ -185,14 +357,36 @@ div.stButton > button {
     line-height: normal !important;
     padding-top: 0.5rem !important;
     padding-bottom: 0.5rem !important;
+    white-space: nowrap !important;
 }
 
 /* Reset inner text elements for deterministic alignment */
 div.stButton > button > div,
-div.stButton > button > div > p {
+div.stButton > button > div *,
+div.stButton button > div,
+div.stButton button > div *,
+div[data-testid="stFormSubmitButton"] > button > div,
+div[data-testid="stFormSubmitButton"] > button > div *,
+div[data-testid="stFormSubmitButton"] button > div,
+div[data-testid="stFormSubmitButton"] button > div *,
+div.stDownloadButton > button > div,
+div.stDownloadButton > button > div *,
+div.stDownloadButton button > div,
+div.stDownloadButton button > div *,
+div[data-testid="stDownloadButton"] > button > div,
+div[data-testid="stDownloadButton"] > button > div *,
+div[data-testid="stDownloadButton"] button > div,
+div[data-testid="stDownloadButton"] button > div *,
+div[data-testid="stFileUploader"] button > div,
+div[data-testid="stFileUploader"] button > div *,
+div[data-testid="stFileUploaderDropzone"] button > div,
+div[data-testid="stFileUploaderDropzone"] button > div *,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] > div,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] > div * {
     line-height: 1 !important;
     margin: 0 !important;
     padding: 0 !important;
+    color: inherit !important;
 }
 
 /* Spinbutton Fixes: Neutral focus ring for A11Y, no stuck colors */
@@ -218,46 +412,93 @@ div[data-baseweb="input"]:focus-within button[data-baseweb="spinbutton"]:not(:ho
     box-shadow: none !important;
 }
 
-/* Primary Button High Contrast */
-div.stButton > button[kind="primary"] {
+/* Unified action button theme (Extract / Compare / Build) */
+div.stButton > button,
+div.stButton button,
+div.stFormSubmitButton > button,
+div.stFormSubmitButton button,
+div[data-testid="stFormSubmitButton"] > button,
+div[data-testid="stFormSubmitButton"] button,
+div.stDownloadButton > button,
+div.stDownloadButton button,
+div[data-testid="stDownloadButton"] > button,
+div[data-testid="stDownloadButton"] button,
+div[data-testid="stFileUploader"] button,
+div[data-testid="stFileUploaderDropzone"] button,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] {
   background-color: var(--brand-primary) !important;
   color: #ffffff !important;
   border: 1px solid var(--brand-primary) !important;
 }
-div.stButton > button[kind="primary"]:hover,
-div.stButton > button[kind="primary"]:focus {
+div.stButton > button:hover,
+div.stButton button:hover,
+div.stFormSubmitButton > button:hover,
+div.stFormSubmitButton button:hover,
+div[data-testid="stFormSubmitButton"] > button:hover,
+div[data-testid="stFormSubmitButton"] button:hover,
+div.stDownloadButton > button:hover,
+div.stDownloadButton button:hover,
+div[data-testid="stDownloadButton"] > button:hover,
+div[data-testid="stDownloadButton"] button:hover,
+div[data-testid="stFileUploader"] button:hover,
+div[data-testid="stFileUploaderDropzone"] button:hover,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]:hover {
   background-color: var(--brand-primary-hover) !important;
   border-color: var(--brand-primary-hover) !important;
   color: #ffffff !important;
 }
-div.stButton > button[kind="primary"]:active {
+div.stButton > button:focus,
+div.stButton > button:focus-visible,
+div.stButton button:focus,
+div.stButton button:focus-visible,
+div.stFormSubmitButton > button:focus,
+div.stFormSubmitButton > button:focus-visible,
+div.stFormSubmitButton button:focus,
+div.stFormSubmitButton button:focus-visible,
+div[data-testid="stFormSubmitButton"] > button:focus,
+div[data-testid="stFormSubmitButton"] > button:focus-visible,
+div[data-testid="stFormSubmitButton"] button:focus,
+div[data-testid="stFormSubmitButton"] button:focus-visible,
+div.stDownloadButton > button:focus,
+div.stDownloadButton > button:focus-visible,
+div.stDownloadButton button:focus,
+div.stDownloadButton button:focus-visible,
+div[data-testid="stDownloadButton"] > button:focus,
+div[data-testid="stDownloadButton"] > button:focus-visible,
+div[data-testid="stDownloadButton"] button:focus,
+div[data-testid="stDownloadButton"] button:focus-visible,
+div[data-testid="stFileUploader"] button:focus,
+div[data-testid="stFileUploader"] button:focus-visible,
+div[data-testid="stFileUploaderDropzone"] button:focus,
+div[data-testid="stFileUploaderDropzone"] button:focus-visible,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]:focus,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]:focus-visible {
   background-color: var(--brand-primary) !important;
+  border-color: var(--brand-primary) !important;
   color: #ffffff !important;
 }
-
-/* Secondary Button Contrast */
-div.stButton > button[kind="secondary"] {
-  background-color: transparent !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--text-tertiary) !important;
-}
-div.stButton > button[kind="secondary"]:hover {
-  border-color: var(--brand-primary) !important;
-  color: var(--brand-primary) !important;
+div.stButton > button:active,
+div.stButton button:active,
+div.stFormSubmitButton > button:active,
+div.stFormSubmitButton button:active,
+div[data-testid="stFormSubmitButton"] button:active,
+div[data-testid="stFormSubmitButton"] > button:active,
+div.stDownloadButton > button:active,
+div.stDownloadButton button:active,
+div[data-testid="stDownloadButton"] > button:active,
+div[data-testid="stDownloadButton"] button:active,
+div[data-testid="stFileUploader"] button:active,
+div[data-testid="stFileUploaderDropzone"] button:active,
+div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]:active {
+  background-color: var(--brand-primary-hover) !important;
+  border-color: var(--brand-primary-hover) !important;
+  color: #ffffff !important;
 }
 
 /* Tooltip Visibility */
 div[data-testid="stTooltipContent"] {
     background-color: #333333 !important;
     color: #ffffff !important;
-}
-  background-color: var(--bg-surface) !important;
-  color: var(--text-primary) !important;
-  border: 1px solid var(--border-strong) !important;
-}
-div.stButton > button[kind="secondary"]:hover {
-  border-color: var(--text-tertiary) !important;
-  background-color: var(--bg-subtle) !important;
 }
 
 /* Tooltip Fix (Attempt to override dark-on-dark if Streamlit inherits colors incorrectly) */
@@ -286,6 +527,329 @@ div[role="tooltip"] {
 .status-review { background: #fef9c3; color: #854d0e; border: 1px solid #fde047; }
 .status-missing { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
 
+/* Run summary strip */
+.run-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 0.25rem 0 0.85rem;
+}
+.run-item {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  padding: 0.5rem 0.65rem;
+}
+.run-item .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+.run-item .value {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.2;
+  word-break: break-word;
+}
+.run-value-good { color: #166534 !important; }
+.run-value-warn { color: #b45309 !important; }
+.run-value-bad { color: #991b1b !important; }
+
+/* Extraction quality panel */
+.quality-panel {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.7rem 0.85rem;
+}
+.quality-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.quality-chip {
+  display: inline-flex;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  padding: 0.14rem 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.quality-high { background: #dcfce7; color: #166534; }
+.quality-medium { background: #fef9c3; color: #854d0e; }
+.quality-low { background: #fee2e2; color: #991b1b; }
+
+/* Dataframe readability */
+div[data-testid="stDataFrame"] [role="columnheader"] {
+  font-weight: 700 !important;
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+}
+div[data-testid="stDataFrame"] [role="columnheader"] * {
+  color: #0f172a !important;
+}
+div[data-testid="stDataFrame"] [role="gridcell"] {
+  line-height: 1.35 !important;
+}
+div[data-testid="stDataFrame"] [role="gridcell"] [data-testid="stMarkdownContainer"] p {
+  margin: 0 !important;
+}
+
+/* Expander readability */
+div[data-testid="stExpander"] details {
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  background: #ffffff !important;
+}
+div[data-testid="stExpander"] summary {
+  background: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  border-radius: 8px !important;
+}
+div[data-testid="stExpander"] summary * {
+  color: var(--text-primary) !important;
+}
+div[data-testid="stExpander"] summary:hover {
+  background: var(--bg-subtle) !important;
+}
+
+/* Popover as clickable info icon */
+div[data-testid="stPopover"] button {
+  width: 2rem !important;
+  min-width: 2rem !important;
+  height: 2rem !important;
+  padding: 0 !important;
+  border-radius: 999px !important;
+  background: #e8f2f7 !important;
+  color: #0f5d75 !important;
+  border: 1px solid #b8d0db !important;
+  font-weight: 700 !important;
+}
+div[data-testid="stPopover"] button:hover,
+div[data-testid="stPopover"] button:focus-visible {
+  background: #d8eaf3 !important;
+  border-color: #8eb3c4 !important;
+  color: #0b4a5d !important;
+}
+[data-baseweb="popover"] {
+  max-width: min(92vw, 520px) !important;
+}
+[data-baseweb="popover"] * {
+  color: var(--text-primary) !important;
+}
+[data-baseweb="popover"] p,
+[data-baseweb="popover"] li {
+  color: var(--text-primary) !important;
+}
+
+/* Top-right Streamlit main menu readability (next to Deploy) */
+div[data-testid="stMainMenuPopover"],
+div[data-testid="stMainMenuPopover"] > div,
+div[data-testid="stMainMenuPopover"] [role="menu"] {
+  background: var(--bg-core) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-strong) !important;
+}
+div[data-testid="stMainMenuPopover"] [role="menuitem"],
+div[data-testid="stMainMenuPopover"] [role="menuitem"] * {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+}
+div[data-testid="stMainMenuPopover"] a,
+div[data-testid="stMainMenuPopover"] a *,
+div[data-testid="stMainMenuPopover"] button,
+div[data-testid="stMainMenuPopover"] button *,
+div[data-testid="stMainMenuPopover"] [role="link"],
+div[data-testid="stMainMenuPopover"] [role="link"] * {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+div[data-testid="stMainMenuPopover"] [role="menuitem"]:hover,
+div[data-testid="stMainMenuPopover"] [role="menuitem"]:focus-visible {
+  background: var(--bg-subtle) !important;
+  color: var(--text-primary) !important;
+}
+div[data-testid="stMainMenuPopover"] a:hover,
+div[data-testid="stMainMenuPopover"] button:hover,
+div[data-testid="stMainMenuPopover"] [role="link"]:hover,
+div[data-testid="stMainMenuPopover"] a:focus-visible,
+div[data-testid="stMainMenuPopover"] button:focus-visible,
+div[data-testid="stMainMenuPopover"] [role="link"]:focus-visible {
+  background: var(--bg-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Fallback for Streamlit/BaseWeb menu portal structures */
+[data-baseweb="popover"] [role="menu"] {
+  background: var(--bg-core) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-strong) !important;
+}
+[data-baseweb="popover"] [role="menu"] > *,
+[data-baseweb="popover"] [role="menu"] [role="none"],
+[data-baseweb="popover"] [role="menu"] ul,
+[data-baseweb="popover"] [role="menu"] li,
+[data-baseweb="popover"] [role="menu"] div {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+}
+[data-baseweb="popover"] [role="menu"] [role="menuitem"],
+[data-baseweb="popover"] [role="menu"] a,
+[data-baseweb="popover"] [role="menu"] button,
+[data-baseweb="popover"] [role="menu"] [role="link"] {
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+}
+[data-baseweb="popover"] [role="menu"] [role="menuitem"] *,
+[data-baseweb="popover"] [role="menu"] a *,
+[data-baseweb="popover"] [role="menu"] button *,
+[data-baseweb="popover"] [role="menu"] [role="link"] * {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+}
+[data-baseweb="popover"] [role="menu"] [role="menuitem"]:hover,
+[data-baseweb="popover"] [role="menu"] [role="menuitem"]:focus-visible,
+[data-baseweb="popover"] [role="menu"] a:hover,
+[data-baseweb="popover"] [role="menu"] a:focus-visible,
+[data-baseweb="popover"] [role="menu"] button:hover,
+[data-baseweb="popover"] [role="menu"] button:focus-visible,
+[data-baseweb="popover"] [role="menu"] [role="link"]:hover,
+[data-baseweb="popover"] [role="menu"] [role="link"]:focus-visible {
+  background: var(--bg-subtle) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Explicit Streamlit main menu list rows (role=option) */
+[data-testid="stMainMenuList"] {
+  background: var(--bg-core) !important;
+  color: var(--text-primary) !important;
+}
+[data-testid="stMainMenuList"] li,
+[data-testid="stMainMenuList"] ul,
+[data-testid="stMainMenuList"] [role="option"],
+[data-testid="stMainMenuList"] [role="option"] *,
+[data-testid="stMainMenuList"] li *,
+[data-testid="stMainMenuList"] span,
+[data-testid="stMainMenuList"] kbd {
+  color: var(--text-primary) !important;
+}
+[data-testid="stMainMenuList"] li,
+[data-testid="stMainMenuList"] [role="option"] {
+  background: var(--bg-core) !important;
+}
+[data-testid="stMainMenuList"] li:hover,
+[data-testid="stMainMenuList"] li:focus-visible,
+[data-testid="stMainMenuList"] [role="option"]:hover,
+[data-testid="stMainMenuList"] [role="option"]:focus-visible {
+  background: var(--bg-subtle) !important;
+}
+
+/* Workflow Step Tracker */
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0.25rem 0 1.0rem;
+}
+.workflow-step {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  padding: 0.55rem 0.7rem;
+}
+.workflow-step.active {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 1px rgba(15, 93, 117, 0.25);
+}
+.workflow-step .step-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.workflow-step .step-state {
+  display: inline-flex;
+  margin-top: 0.3rem;
+  border-radius: 9999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.workflow-step .state-not-run,
+.workflow-step .state-locked {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+.workflow-step .state-in-progress {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+.workflow-step .state-completed {
+  background: #dcfce7;
+  color: #166534;
+}
+.workflow-step .state-needs-review {
+  background: #fee2e2;
+  color: #991b1b;
+}
+@media (max-width: 980px) {
+  [data-testid="stHeader"] > div::before {
+    left: 2.6rem;
+    font-size: 1.1rem;
+    max-width: calc(100vw - 11rem);
+  }
+  .step-heading {
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.55rem 0.65rem;
+  }
+  .run-summary {
+    grid-template-columns: 1fr;
+  }
+  .workflow-steps {
+    grid-template-columns: 1fr;
+  }
+  div[data-testid="stElementContainer"]:has(> div[data-testid="stButton"]),
+  div[data-testid="stElementContainer"]:has(> div[data-testid="stFormSubmitButton"]),
+  div[data-testid="stElementContainer"]:has(> div[data-testid="stDownloadButton"]),
+  div[data-testid="stElementContainer"]:has(> div[data-testid="stFileUploader"]),
+  div[data-testid="stElementContainer"]:has(> div[data-testid="stFileUploaderDropzone"]) {
+    width: 100% !important;
+  }
+  div.stButton,
+  div[data-testid="stButton"],
+  div[data-testid="stFormSubmitButton"],
+  div.stDownloadButton,
+  div[data-testid="stDownloadButton"],
+  div[data-testid="stFileUploader"],
+  div[data-testid="stFileUploaderDropzone"] {
+    width: 100% !important;
+  }
+  div.stButton > button,
+  div.stButton button,
+  div[data-testid="stFormSubmitButton"] > button,
+  div[data-testid="stFormSubmitButton"] button,
+  div.stDownloadButton > button,
+  div.stDownloadButton button,
+  div[data-testid="stDownloadButton"] > button,
+  div[data-testid="stDownloadButton"] button,
+  div[data-testid="stFileUploader"] button,
+  div[data-testid="stFileUploaderDropzone"] button,
+  div[data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
 /* Code blocks */
 code {
   color: var(--brand-primary);
@@ -299,15 +863,16 @@ code {
     )
 
 
-def reset_session_if_schema_changed() -> None:
-    existing = st.session_state.get("_app_schema_version")
-    if existing == APP_SESSION_SCHEMA_VERSION:
-        return
+def clear_workflow_state() -> None:
     keys_to_clear = [
         "snapshot",
         "annual_summary_preview",
         "analysis_scope",
         "annual_packet",
+        "w2_validation",
+        "extract_run_meta",
+        "extract_quality",
+        "_w2_autofilled_fields",
         "manual_w2_prefill_source",
         "manual_w2_states",
         "box1",
@@ -322,7 +887,288 @@ def reset_session_if_schema_changed() -> None:
             continue
         if key in keys_to_clear or key.startswith("box16_") or key.startswith("box17_"):
             st.session_state.pop(key, None)
+
+
+def reset_session_if_schema_changed() -> None:
+    existing = st.session_state.get("_app_schema_version")
+    if existing == APP_SESSION_SCHEMA_VERSION:
+        return
+    clear_workflow_state()
+    st.session_state.pop("_analysis_scope_last", None)
+    st.session_state["_w2_upload_version"] = 0
     st.session_state["_app_schema_version"] = APP_SESSION_SCHEMA_VERSION
+
+
+def to_decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
+def format_currency_display(value: Any) -> str:
+    amount = to_decimal(value)
+    if amount is None:
+        return "—"
+    return f"${amount:,.2f}"
+
+
+def format_plain_display(value: Any) -> str:
+    if value in (None, ""):
+        return "—"
+    return str(value)
+
+
+def format_state_map_display(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return "—"
+    pairs: list[str] = []
+    for state in sorted(value.keys()):
+        pairs.append(f"{state}: {format_currency_display(value.get(state))}")
+    return ", ".join(pairs) if pairs else "—"
+
+
+def display_file_name(value: Any) -> str:
+    text = format_plain_display(value)
+    if text in {"—", ""}:
+        return "—"
+    if text.startswith("ALL ("):
+        return text
+    normalized = str(text).replace("\\", "/")
+    base_name = normalized.rsplit("/", 1)[-1]
+    return base_name or text
+
+
+def build_extraction_quality(snapshot: PaystubSnapshot) -> dict[str, Any]:
+    issues: list[dict[str, str]] = []
+    score = 100
+
+    gross_ytd = to_decimal(snapshot.gross_pay.ytd)
+    fed_ytd = to_decimal(snapshot.federal_income_tax.ytd)
+    ss_ytd = to_decimal(snapshot.social_security_tax.ytd)
+    med_ytd = to_decimal(snapshot.medicare_tax.ytd)
+
+    if gross_ytd is None or gross_ytd <= 0:
+        issues.append({"severity": "critical", "message": "Gross pay YTD is missing or zero."})
+        score -= 35
+    for label, value in [
+        ("Federal tax YTD", fed_ytd),
+        ("Social Security tax YTD", ss_ytd),
+        ("Medicare tax YTD", med_ytd),
+    ]:
+        if value is None:
+            issues.append({"severity": "critical", "message": f"{label} could not be extracted."})
+            score -= 35
+
+    if gross_ytd is not None and gross_ytd > 1000 and fed_ytd is not None and fed_ytd == 0:
+        issues.append({"severity": "warning", "message": "Federal tax YTD is zero while gross pay is significant."})
+        score -= 15
+    if not snapshot.state_income_tax:
+        issues.append({"severity": "warning", "message": "No state tax entries were detected in this payslip."})
+        score -= 10
+
+    evidence_lines = [
+        snapshot.gross_pay.source_line,
+        snapshot.federal_income_tax.source_line,
+        snapshot.social_security_tax.source_line,
+        snapshot.medicare_tax.source_line,
+        snapshot.k401_contrib.source_line,
+        *[pair.source_line for pair in snapshot.state_income_tax.values()],
+    ]
+    evidence_count = sum(1 for line in evidence_lines if line)
+    if evidence_count < 5:
+        issues.append({"severity": "warning", "message": "Low evidence coverage detected; verify OCR output lines."})
+        score -= 10
+
+    score = max(0, min(100, score))
+    confidence = "High" if score >= 85 else "Medium" if score >= 65 else "Low"
+    return {"confidence": confidence, "score": score, "issues": issues, "evidence_count": evidence_count}
+
+
+def render_extraction_quality_panel(quality: dict[str, Any]) -> None:
+    confidence = str(quality.get("confidence", "Medium"))
+    score = int(quality.get("score", 0))
+    issue_rows = cast(list[dict[str, str]], quality.get("issues", []))
+    evidence_count = int(quality.get("evidence_count", 0))
+    chip_class = (
+        "quality-high" if confidence == "High" else "quality-medium" if confidence == "Medium" else "quality-low"
+    )
+
+    issue_markdown = ""
+    if issue_rows:
+        issue_markdown = (
+            "<ul>"
+            + "".join(
+                f"<li><strong>{row.get('severity', '').title()}:</strong> {row.get('message', '')}</li>"
+                for row in issue_rows
+            )
+            + "</ul>"
+        )
+    else:
+        issue_markdown = "<p>No extraction warnings detected.</p>"
+
+    st.markdown(
+        (
+            "<div class='quality-panel'>"
+            "<div class='quality-head'>"
+            f"<span class='quality-chip {chip_class}'>{confidence}</span>"
+            f"<strong>Extraction Confidence: {score}/100</strong>"
+            "</div>"
+            f"<p>Evidence lines captured: <strong>{evidence_count}</strong></p>"
+            f"{issue_markdown}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_run_summary(tax_year: int, file_count: int) -> None:
+    run_meta = cast(dict[str, Any], st.session_state.get("extract_run_meta", {}))
+    quality_meta = cast(dict[str, Any], st.session_state.get("extract_quality", {}))
+    w2_validation = cast(dict[str, Any], st.session_state.get("w2_validation", {}))
+    packet = cast(dict[str, Any], st.session_state.get("annual_packet", {}))
+
+    last_run_text = "Not run"
+    last_run_class = "run-value-warn"
+    if run_meta:
+        ts = format_plain_display(run_meta.get("timestamp"))
+        duration_s = run_meta.get("duration_s")
+        run_status = str(run_meta.get("status", "Completed"))
+        if duration_s is not None:
+            last_run_text = f"{run_status}: {ts} ({duration_s:.1f}s)"
+        else:
+            last_run_text = f"{run_status}: {ts}"
+        last_run_class = "run-value-bad" if run_status.lower() == "failed" else "run-value-good"
+
+    mismatch_count = 0
+    if w2_validation:
+        summary = cast(dict[str, Any], w2_validation.get("comparison_summary", {}))
+        mismatch_count = int(summary.get("mismatch", 0)) + int(summary.get("review_needed", 0))
+
+    ready_text = "Pending"
+    ready_class = "run-value-warn"
+    if packet:
+        is_ready = bool(packet.get("ready_to_file"))
+        ready_text = "Ready" if is_ready else "Needs review"
+        ready_class = "run-value-good" if is_ready else "run-value-bad"
+
+    confidence_text = "Pending"
+    confidence_class = "run-value-warn"
+    if quality_meta:
+        confidence_text = str(quality_meta.get("confidence", "Pending"))
+        confidence_class = (
+            "run-value-good"
+            if confidence_text == "High"
+            else "run-value-warn"
+            if confidence_text == "Medium"
+            else "run-value-bad"
+        )
+
+    mismatch_class = "run-value-good" if mismatch_count == 0 else "run-value-bad"
+
+    st.markdown(
+        (
+            "<div class='run-summary'>"
+            f"<div class='run-item'><div class='label'>Tax Year</div><div class='value'>{tax_year}</div></div>"
+            f"<div class='run-item'><div class='label'>Paystubs Found</div><div class='value'>{file_count}</div></div>"
+            f"<div class='run-item'><div class='label'>Last Extraction</div><div class='value {last_run_class}'>{last_run_text}</div></div>"
+            f"<div class='run-item'><div class='label'>Step 2 Flags</div><div class='value {mismatch_class}'>{mismatch_count}</div></div>"
+            f"<div class='run-item'><div class='label'>Ready To File</div><div class='value {ready_class}'>{ready_text}</div>"
+            f"<div class='label' style='margin-top:0.25rem;'>Extraction Confidence</div>"
+            f"<div class='value {confidence_class}'>{confidence_text}</div></div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def style_flagged_rows(
+    df: pd.DataFrame, flag_column: str, right_align_columns: list[str] | None = None
+) -> pd.io.formats.style.Styler:
+    def apply_row_style(row: pd.Series) -> list[str]:
+        flagged = str(row.get(flag_column, "—")) != "—"
+        if not flagged:
+            return [""] * len(row)
+        return ["background-color: #fef2f2; color: #b91c1c; font-weight: 600"] * len(row)
+
+    styled = df.style.apply(apply_row_style, axis=1)
+    if right_align_columns:
+        available = [col for col in right_align_columns if col in df.columns]
+        if available:
+            styled = styled.set_properties(
+                subset=available,
+                **{"text-align": "right", "font-family": "'JetBrains Mono', monospace"},
+            )
+    return styled
+
+
+def build_comparison_display_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
+    display_rows: list[dict[str, str]] = []
+    for row in rows:
+        status_raw = str(row.get("status", ""))
+        status = status_raw.replace("_", " ").title()
+        severity = "Flagged" if status_raw in {"mismatch", "review_needed"} else "OK"
+        display_rows.append(
+            {
+                "Field": format_plain_display(row.get("field")),
+                "Paystub": format_currency_display(row.get("paystub")),
+                "W-2": format_currency_display(row.get("w2")),
+                "Difference": format_currency_display(row.get("difference")),
+                "Status": status,
+                "Flag": severity if severity == "Flagged" else "—",
+            }
+        )
+    return pd.DataFrame(display_rows)
+
+
+def build_ledger_display_df(ledger: list[dict[str, Any]]) -> pd.DataFrame:
+    if not ledger:
+        return pd.DataFrame()
+    rows: list[dict[str, str]] = []
+    for row in ledger:
+        rows.append(
+            {
+                "Pay Date": format_plain_display(row.get("pay_date")),
+                "File": display_file_name(row.get("file")),
+                "Gross YTD": format_currency_display(row.get("gross_pay_ytd")),
+                "Federal YTD": format_currency_display(row.get("federal_tax_ytd")),
+                "SS YTD": format_currency_display(row.get("social_security_tax_ytd")),
+                "Medicare YTD": format_currency_display(row.get("medicare_tax_ytd")),
+                "State YTD Total": format_currency_display(row.get("state_tax_ytd_total")),
+                "State YTD By State": format_state_map_display(row.get("state_tax_ytd_by_state")),
+                "YTD Verification": format_plain_display(row.get("ytd_verification")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def build_state_detail_rows(snapshot: PaystubSnapshot) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for state, pair in sorted(snapshot.state_income_tax.items()):
+        rows.append(
+            {
+                "State": state,
+                "This Period": format_currency_display(pair.this_period),
+                "YTD": format_currency_display(pair.ytd),
+                "Evidence": pair.source_line if pair.source_line else "—",
+            }
+        )
+    return rows
+
+
+def collect_evidence_lines(extracted: dict[str, Any]) -> list[tuple[str, str]]:
+    evidence_lines: list[tuple[str, str]] = []
+    for key in ["gross_pay", "federal_income_tax", "social_security_tax", "medicare_tax", "k401_contrib"]:
+        line = extracted.get(key, {}).get("evidence")
+        if line:
+            evidence_lines.append((key, line))
+    for state, row in sorted(extracted.get("state_income_tax", {}).items()):
+        evidence = row.get("evidence")
+        if evidence:
+            evidence_lines.append((f"state_{state}", evidence))
+    return evidence_lines
 
 
 def metric_card(label: str, value: str) -> None:
@@ -468,27 +1314,37 @@ def sync_manual_w2_from_upload(
         form_states = ["VA"]
     st.session_state["manual_w2_states"] = form_states
     ensure_manual_w2_defaults(form_states)
+    autofilled_fields: set[str] = set()
 
     st.session_state["box1"] = as_number(uploaded_w2_data.get("box_1_wages_tips_other_comp"), st.session_state["box1"])
+    autofilled_fields.add("box1")
     st.session_state["box2"] = as_number(
         uploaded_w2_data.get("box_2_federal_income_tax_withheld"), st.session_state["box2"]
     )
+    autofilled_fields.add("box2")
     st.session_state["box3"] = as_number(uploaded_w2_data.get("box_3_social_security_wages"), st.session_state["box3"])
+    autofilled_fields.add("box3")
     st.session_state["box4"] = as_number(
         uploaded_w2_data.get("box_4_social_security_tax_withheld"), st.session_state["box4"]
     )
+    autofilled_fields.add("box4")
     st.session_state["box5"] = as_number(
         uploaded_w2_data.get("box_5_medicare_wages_and_tips"), st.session_state["box5"]
     )
+    autofilled_fields.add("box5")
     st.session_state["box6"] = as_number(uploaded_w2_data.get("box_6_medicare_tax_withheld"), st.session_state["box6"])
+    autofilled_fields.add("box6")
 
     for state in form_states:
         state_row = uploaded_states.get(state)
         if state_row:
             st.session_state[f"box16_{state}"] = state_row["box16"]
             st.session_state[f"box17_{state}"] = state_row["box17"]
+            autofilled_fields.add(f"box16_{state}")
+            autofilled_fields.add(f"box17_{state}")
 
     st.session_state["manual_w2_prefill_source"] = source_tag
+    st.session_state["_w2_autofilled_fields"] = sorted(autofilled_fields)
 
 
 def build_manual_w2(snapshot: PaystubSnapshot, tax_year: int) -> dict[str, Any]:
@@ -499,28 +1355,70 @@ def build_manual_w2(snapshot: PaystubSnapshot, tax_year: int) -> dict[str, Any]:
         states_for_form = ["VA"]
     st.session_state["manual_w2_states"] = states_for_form
     ensure_manual_w2_defaults(states_for_form)
+    autofilled = set(cast(list[str], st.session_state.get("_w2_autofilled_fields", [])))
+
+    def autofill_label(base: str, key: str) -> str:
+        return f"{base} [Auto-filled]" if key in autofilled else base
 
     st.subheader("W-2 Inputs")
     st.caption("Enter your W-2 box values. Use cents for exact matching.")
+    if autofilled:
+        st.caption(f"{len(autofilled)} field(s) were auto-filled from the uploaded W-2.")
 
+    st.markdown("#### Federal Income Tax")
     c1, c2 = st.columns(2)
     with c1:
-        box1 = st.number_input("Box 1 wages", min_value=0.0, step=0.01, key="box1")
-        box2 = st.number_input("Box 2 federal tax", min_value=0.0, step=0.01, key="box2")
-        box4 = st.number_input("Box 4 Social Security tax", min_value=0.0, step=0.01, key="box4")
+        box1 = st.number_input(autofill_label("Box 1 wages", "box1"), min_value=0.0, step=0.01, key="box1")
     with c2:
-        box3 = st.number_input("Box 3 Social Security wages", min_value=0.0, step=0.01, key="box3")
-        box5 = st.number_input("Box 5 Medicare wages", min_value=0.0, step=0.01, key="box5")
-        box6 = st.number_input("Box 6 Medicare tax", min_value=0.0, step=0.01, key="box6")
+        box2 = st.number_input(autofill_label("Box 2 federal tax", "box2"), min_value=0.0, step=0.01, key="box2")
+
+    st.markdown("#### Payroll Taxes (FICA)")
+    c3, c4 = st.columns(2)
+    with c3:
+        box3 = st.number_input(
+            autofill_label("Box 3 Social Security wages", "box3"),
+            min_value=0.0,
+            step=0.01,
+            key="box3",
+        )
+        box4 = st.number_input(
+            autofill_label("Box 4 Social Security tax", "box4"),
+            min_value=0.0,
+            step=0.01,
+            key="box4",
+        )
+    with c4:
+        box5 = st.number_input(
+            autofill_label("Box 5 Medicare wages", "box5"),
+            min_value=0.0,
+            step=0.01,
+            key="box5",
+        )
+        box6 = st.number_input(
+            autofill_label("Box 6 Medicare tax", "box6"),
+            min_value=0.0,
+            step=0.01,
+            key="box6",
+        )
 
     st.markdown("#### State Boxes")
     state_boxes = []
     for state in st.session_state.get("manual_w2_states", states_for_form):
         s1, s2 = st.columns(2)
         with s1:
-            box16 = st.number_input(f"{state} Box 16 wages", min_value=0.0, step=0.01, key=f"box16_{state}")
+            box16 = st.number_input(
+                autofill_label(f"{state} Box 16 wages", f"box16_{state}"),
+                min_value=0.0,
+                step=0.01,
+                key=f"box16_{state}",
+            )
         with s2:
-            box17 = st.number_input(f"{state} Box 17 tax", min_value=0.0, step=0.01, key=f"box17_{state}")
+            box17 = st.number_input(
+                autofill_label(f"{state} Box 17 tax", f"box17_{state}"),
+                min_value=0.0,
+                step=0.01,
+                key=f"box17_{state}",
+            )
         state_boxes.append(
             {
                 "state": state,
@@ -551,6 +1449,47 @@ def status_pill(status: str) -> str:
     else:
         klass = "status-missing"
     return f"<span class='status-pill {klass}'>{status}</span>"
+
+
+def step_state_class(step_state: str) -> str:
+    normalized = step_state.lower().replace(" ", "-")
+    return f"state-{normalized}"
+
+
+def render_workflow_steps(steps: list[dict[str, Any]]) -> None:
+    cards: list[str] = []
+    for step in steps:
+        active_class = " active" if step.get("active", False) else ""
+        state = str(step.get("state", "Not run"))
+        state_class = step_state_class(state)
+        title = str(step.get("title", ""))
+        cards.append(
+            "<div class='workflow-step"
+            + active_class
+            + "'><div class='step-title'>"
+            + title
+            + "</div><span class='step-state "
+            + state_class
+            + "'>"
+            + state
+            + "</span></div>"
+        )
+    st.markdown("<div class='workflow-steps'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
+
+
+def render_step_heading(step_number: int, title: str, subtitle: str) -> None:
+    st.markdown(
+        (
+            "<div class='step-heading'>"
+            f"<span class='step-chip'>Step {step_number}</span>"
+            "<div class='step-copy'>"
+            f"<h3>{title}</h3>"
+            f"<p>{subtitle}</p>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
@@ -591,8 +1530,14 @@ def main() -> None:
     reset_session_if_schema_changed()
     apply_theme()
 
-    st.markdown("# Paystub Truth Check")
-    st.markdown("Cross-verify latest paystub YTD values against your W-2 with evidence lines.")
+    st.markdown(
+        (
+            "<div class='app-intro'>"
+            "<p>Cross-verify latest paystub YTD values against your W-2 with evidence lines.</p>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
     with st.sidebar:
         st.header("Run Settings")
@@ -607,58 +1552,180 @@ def main() -> None:
         return
 
     latest_file, latest_date = select_latest_paystub(files)
-    analysis_scope = st.radio(
-        "Analysis Scope",
-        options=["Single payslip", "All payslips in year"],
-        horizontal=True,
-    )
+    prior_snapshot = st.session_state.get("snapshot")
+    prior_w2_validation = st.session_state.get("w2_validation")
+    prior_packet = st.session_state.get("annual_packet")
 
-    selected = str(latest_file)
-    if analysis_scope == "Single payslip":
-        selected = st.selectbox(
-            "Select payslip to extract",
-            options=[str(path) for path in files],
-            index=[str(path) for path in files].index(str(latest_file)),
+    step1_complete = prior_snapshot is not None
+    step2_complete = prior_w2_validation is not None
+    step3_complete = prior_packet is not None
+
+    step2_needs_review = False
+    if isinstance(prior_w2_validation, dict):
+        summary = cast(dict[str, Any], prior_w2_validation.get("comparison_summary", {}))
+        step2_needs_review = summary.get("mismatch", 0) > 0 or summary.get("review_needed", 0) > 0
+    step2_marked_completed = step2_complete and not step2_needs_review
+
+    step3_needs_review = False
+    if isinstance(prior_packet, dict):
+        packet_summary = cast(dict[str, Any], prior_packet)
+        critical_count = sum(
+            1
+            for issue in packet_summary.get("consistency_issues", [])
+            if isinstance(issue, dict) and issue.get("severity") == "critical"
         )
-    else:
-        st.caption("Year mode will process every payslip in this folder/year and show a full-year summary.")
+        step3_needs_review = critical_count > 0 or not bool(packet_summary.get("ready_to_file"))
 
-    if st.button("Extract Values", type="primary"):
-        if analysis_scope == "All payslips in year":
-            annual_snapshots = collect_annual_snapshots(
-                paystubs_dir=paystubs_dir,
-                year=int(year),
-                render_scale=render_scale,
-                psm=6,
+    if not step1_complete:
+        active_step = 1
+    elif not step2_marked_completed:
+        active_step = 2
+    else:
+        active_step = 3
+
+    workflow_steps: list[dict[str, Any]] = [
+        {
+            "title": "Step 1: Extract Payslip Values",
+            "state": "Completed" if step1_complete else "In progress",
+            "active": active_step == 1,
+        },
+        {
+            "title": "Step 2: Compare With W-2",
+            "state": (
+                "Locked"
+                if not step1_complete
+                else "Needs review"
+                if step2_complete and step2_needs_review
+                else "Completed"
+                if step2_complete
+                else "In progress"
+            ),
+            "active": active_step == 2,
+        },
+        {
+            "title": "Step 3: Build Filing Packet",
+            "state": (
+                "Locked"
+                if not step2_marked_completed
+                else "Needs review"
+                if step3_complete and step3_needs_review
+                else "Completed"
+                if step3_complete
+                else "In progress"
+            ),
+            "active": active_step == 3,
+        },
+    ]
+    render_workflow_steps(workflow_steps)
+    st.markdown("### Run Summary")
+    render_run_summary(int(year), len(files))
+
+    render_step_heading(
+        1,
+        "Extract Payslip Values",
+        "Run OCR extraction to capture YTD taxes and evidence lines from your selected payslip scope.",
+    )
+    with st.container():
+        analysis_scope = st.radio(
+            "Analysis Scope",
+            options=["Single payslip", "All payslips in year"],
+            horizontal=True,
+            key="analysis_scope_choice",
+        )
+        prior_scope = st.session_state.get("_analysis_scope_last")
+        if prior_scope is None:
+            st.session_state["_analysis_scope_last"] = analysis_scope
+        elif analysis_scope != prior_scope:
+            clear_workflow_state()
+            st.session_state["_analysis_scope_last"] = analysis_scope
+            st.session_state["_w2_upload_version"] = int(st.session_state.get("_w2_upload_version", 0)) + 1
+            st.rerun()
+
+        selected = str(latest_file)
+        if analysis_scope == "Single payslip":
+            selected = st.selectbox(
+                "Select payslip to extract",
+                options=[str(path) for path in files],
+                index=[str(path) for path in files].index(str(latest_file)),
             )
-            if not annual_snapshots:
-                st.error("No paystubs found for full-year analysis.")
-                return
-            snapshot = annual_snapshots[-1]
-            annual_summary = build_tax_filing_package(
-                tax_year=int(year),
-                snapshots=annual_snapshots,
-                tolerance=tolerance,
-                w2_data=None,
-            )
-            st.session_state["snapshot"] = snapshot
-            st.session_state["annual_summary_preview"] = annual_summary
-            st.session_state["analysis_scope"] = "all_year"
         else:
-            snapshot = extract_paystub_snapshot(Path(selected), render_scale=render_scale)
-            st.session_state["snapshot"] = snapshot
-            st.session_state.pop("annual_summary_preview", None)
-            st.session_state["analysis_scope"] = "single"
+            st.caption("Year mode will process every payslip in this folder/year and show a full-year summary.")
+
+    extract_button_type: ButtonKind = "primary" if active_step == 1 else "secondary"
+    with st.container():
+        st.caption("Run extraction to parse OCR values and refresh confidence checks.")
+        if st.button("Run Extraction", type=extract_button_type):
+            start_perf = time.perf_counter()
+            run_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                with st.spinner("Running OCR extraction and consistency checks..."):
+                    if analysis_scope == "All payslips in year":
+                        annual_snapshots = collect_annual_snapshots(
+                            paystubs_dir=paystubs_dir,
+                            year=int(year),
+                            render_scale=render_scale,
+                            psm=6,
+                        )
+                        if not annual_snapshots:
+                            st.error("No paystubs found for full-year analysis.")
+                            return
+                        snapshot = annual_snapshots[-1]
+                        annual_summary = build_tax_filing_package(
+                            tax_year=int(year),
+                            snapshots=annual_snapshots,
+                            tolerance=tolerance,
+                            w2_data=None,
+                        )
+                        st.session_state["snapshot"] = snapshot
+                        st.session_state["annual_summary_preview"] = annual_summary
+                        st.session_state["analysis_scope"] = "all_year"
+                        source_file = f"ALL ({len(annual_snapshots)} payslips)"
+                        raw_count = len(annual_snapshots)
+                    else:
+                        snapshot = extract_paystub_snapshot(Path(selected), render_scale=render_scale)
+                        st.session_state["snapshot"] = snapshot
+                        st.session_state.pop("annual_summary_preview", None)
+                        st.session_state["analysis_scope"] = "single"
+                        source_file = selected
+                        raw_count = 1
+                quality = build_extraction_quality(snapshot)
+                duration = round(time.perf_counter() - start_perf, 2)
+                st.session_state["extract_quality"] = quality
+                st.session_state["extract_run_meta"] = {
+                    "timestamp": run_timestamp,
+                    "duration_s": duration,
+                    "status": "Completed",
+                    "scope": analysis_scope,
+                    "source_file": source_file,
+                    "paystub_count": raw_count,
+                }
+                st.session_state.pop("w2_validation", None)
+                st.session_state.pop("annual_packet", None)
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                duration = round(time.perf_counter() - start_perf, 2)
+                st.session_state["extract_run_meta"] = {
+                    "timestamp": run_timestamp,
+                    "duration_s": duration,
+                    "status": "Failed",
+                    "error": str(exc),
+                }
+                st.error(f"Extraction failed: {exc}")
+                return
 
     snapshot_data = st.session_state.get("snapshot")
     if snapshot_data is None:
-        st.info("Click 'Extract Values' to begin.")
+        st.info("Click 'Run Extraction' to begin.")
         return
     snapshot = cast(PaystubSnapshot, snapshot_data)
 
     active_scope = st.session_state.get("analysis_scope", "single")
     extracted = snapshot_to_dict(snapshot)
     state_total = sum_state_ytd(snapshot.state_income_tax)
+    quality_data = cast(dict[str, Any], st.session_state.get("extract_quality", {}))
+    if not quality_data:
+        quality_data = build_extraction_quality(snapshot)
+        st.session_state["extract_quality"] = quality_data
 
     m1, m2, m3, m4 = st.columns(4)
     with m1:
@@ -669,6 +1736,8 @@ def main() -> None:
         metric_card("Social Security YTD", format_money(snapshot.social_security_tax.ytd))
     with m4:
         metric_card("Medicare YTD", format_money(snapshot.medicare_tax.ytd))
+
+    render_extraction_quality_panel(quality_data)
 
     if snapshot.state_income_tax:
         st.markdown("### State Tax YTD By State")
@@ -711,52 +1780,68 @@ def main() -> None:
                 f"Latest pay date: {current_annual_summary['latest_pay_date']}"
             )
             st.markdown("#### Per-Payslip Year Ledger")
-            st.dataframe(current_annual_summary["ledger"], use_container_width=True)
-            ytd_flagged = [
-                {
-                    "pay_date": row.get("pay_date"),
-                    "file": row.get("file"),
-                    "ytd_verification": row.get("ytd_verification"),
-                }
-                for row in current_annual_summary["ledger"]
-                if row.get("ytd_verification")
-            ]
-            if ytd_flagged:
+            year_ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], current_annual_summary["ledger"]))
+            st.dataframe(
+                style_flagged_rows(
+                    year_ledger_df,
+                    "YTD Verification",
+                    right_align_columns=[
+                        "Gross YTD",
+                        "Federal YTD",
+                        "SS YTD",
+                        "Medicare YTD",
+                        "State YTD Total",
+                    ],
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+            ytd_flagged = year_ledger_df[year_ledger_df["YTD Verification"] != "—"]
+            if not ytd_flagged.empty:
                 st.warning(
                     "YTD verification detected parsed-vs-calculated mismatches. "
                     "Review the rows below and evidence lines."
                 )
-                st.dataframe(ytd_flagged, use_container_width=True)
+                st.dataframe(ytd_flagged, use_container_width=True, hide_index=True)
             st.download_button(
-                "Download Year Ledger CSV",
+                "Download Year Ledger (.csv)",
                 data=ledger_to_csv(current_annual_summary["ledger"]),
                 file_name=f"paystub_ledger_{int(year)}.csv",
                 mime="text/csv",
             )
 
     st.markdown("### Extracted State Details")
-    state_rows = []
-    for state, pair in sorted(snapshot.state_income_tax.items()):
-        state_rows.append(
-            {
-                "State": state,
-                "This Period": as_float(pair.this_period),
-                "YTD": as_float(pair.ytd),
-                "Evidence": pair.source_line,
-            }
-        )
-    st.dataframe(state_rows, use_container_width=True)
+    state_rows = build_state_detail_rows(snapshot)
+    state_df = pd.DataFrame(state_rows)
+    st.dataframe(
+        state_df.style.set_properties(
+            subset=[col for col in ["This Period", "YTD"] if col in state_df.columns],
+            **{"text-align": "right", "font-family": "'JetBrains Mono', monospace"},
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
-    with st.expander("Evidence lines", expanded=False):
-        for key in ["gross_pay", "federal_income_tax", "social_security_tax", "medicare_tax", "k401_contrib"]:
-            line = extracted[key]["evidence"]
-            if line:
-                st.markdown(f"- `{key}`: `{line}`")
-        for state, row in sorted(extracted["state_income_tax"].items()):
-            st.markdown(f"- `state_{state}`: `{row['evidence']}`")
+    evidence_rows = collect_evidence_lines(extracted)
+    with st.expander(f"Evidence lines ({len(evidence_rows)})", expanded=False):
+        if evidence_rows:
+            evidence_df = pd.DataFrame([{"Field": key, "Evidence": line} for key, line in evidence_rows])
+            st.dataframe(evidence_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No evidence lines were captured for this extraction.")
 
-    st.markdown("### W-2 Cross-Check")
-    uploaded = st.file_uploader("Upload W-2 JSON or PDF (optional)", type=["json", "pdf"])
+    step2_button_type: ButtonKind = "primary" if active_step == 2 else "secondary"
+    render_step_heading(
+        2,
+        "W-2 Comparison",
+        "Auto-fill or enter W-2 values and run a strict field-by-field comparison against the extracted payslip totals.",
+    )
+    upload_version = int(st.session_state.get("_w2_upload_version", 0))
+    uploaded = st.file_uploader(
+        "Upload W-2 JSON or PDF (optional)",
+        type=["json", "pdf"],
+        key=f"w2_upload_{upload_version}",
+    )
     w2_data = None
     uploaded_source_tag = None
     if uploaded is not None:
@@ -801,24 +1886,11 @@ def main() -> None:
 
     with st.form("manual_w2_form"):
         manual_w2 = build_manual_w2(snapshot, int(year))
-        submitted = st.form_submit_button("Compare Against W-2", type="primary")
+        submitted = st.form_submit_button("Run W-2 Comparison", type=step2_button_type)
 
     selected_w2 = manual_w2
     if submitted:
         comparisons, summary = compare_snapshot_to_w2(snapshot, selected_w2, tolerance)
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Matches", summary.get("match", 0))
-        c2.metric("Mismatches", summary.get("mismatch", 0))
-        c3.metric("Review Needed", summary.get("review_needed", 0))
-
-        st.markdown("#### Comparison Results")
-        for row in comparisons:
-            st.markdown(
-                f"- **{row['field']}** | paystub `{row['paystub']}` | w2 `{row['w2']}` | diff `{row['difference']}` | {status_pill(row['status'])}",
-                unsafe_allow_html=True,
-            )
-
         payload = {
             "tax_year": int(year),
             "latest_paystub_file": snapshot.file,
@@ -828,117 +1900,192 @@ def main() -> None:
             "comparisons": comparisons,
             "comparison_summary": summary,
         }
+        st.session_state["w2_validation"] = payload
+        st.session_state.pop("annual_packet", None)
+        st.rerun()
 
-        st.download_button(
-            "Download Validation JSON",
-            data=json.dumps(payload, indent=2),
-            file_name="w2_validation_ui.json",
-            mime="application/json",
+    w2_validation_data = st.session_state.get("w2_validation")
+    if w2_validation_data:
+        validation_payload = cast(dict[str, Any], w2_validation_data)
+        comparison_summary = cast(dict[str, Any], validation_payload.get("comparison_summary", {}))
+        comparison_rows = cast(list[dict[str, Any]], validation_payload.get("comparisons", []))
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Matches", comparison_summary.get("match", 0))
+        c2.metric("Mismatches", comparison_summary.get("mismatch", 0))
+        c3.metric("Review Needed", comparison_summary.get("review_needed", 0))
+
+        st.markdown("#### Comparison Results")
+        st.caption("Columns: Field, Paystub, W-2, Difference, Status, Flag")
+        comparison_df = build_comparison_display_df(comparison_rows)
+        st.dataframe(
+            style_flagged_rows(
+                comparison_df,
+                "Flag",
+                right_align_columns=["Paystub", "W-2", "Difference"],
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-        st.download_button(
-            "Download Validation Markdown",
-            data=build_report_markdown(payload),
-            file_name="w2_validation_ui.md",
-            mime="text/markdown",
+
+        dl_json_col, dl_md_col, _ = st.columns([1, 1, 2], gap="small")
+        with dl_json_col:
+            st.download_button(
+                "Download Validation (JSON)",
+                data=json.dumps(validation_payload, indent=2),
+                file_name="w2_validation_ui.json",
+                mime="application/json",
+            )
+        with dl_md_col:
+            st.download_button(
+                "Download Validation (.md)",
+                data=build_report_markdown(validation_payload),
+                file_name="w2_validation_ui.md",
+                mime="text/markdown",
+            )
+        if step2_needs_review:
+            st.warning("Step 3 remains locked until Step 2 is marked Completed (no mismatches / review-needed flags).")
+
+    if step2_marked_completed:
+        st.markdown("---")
+        render_step_heading(
+            3,
+            "Filing Packet",
+            "Generate annual ledger artifacts, run filing checks, and produce exportable validation outputs.",
         )
 
-    st.markdown("---")
-    st.markdown("### Annual Filing Packet")
-    st.caption("Build a year-wide ledger from all payslips, run consistency checks, and generate a filing packet.")
-
-    include_w2 = st.checkbox(
-        "Include W-2 comparison in annual packet",
-        value=True,
-        help="Disable this to build the packet from paystubs only.",
-    )
-    if include_w2:
-        st.caption("Checkbox ON: annual packet includes W-2 match/mismatch checks and influences Ready To File.")
-    else:
-        st.caption("Checkbox OFF: annual packet is paystub-only (no W-2 comparison), useful for extraction QA.")
-    if st.button(
-        "Build Annual Filing Packet",
-        type="primary",
-        help=(
-            "Processes all paystubs in the selected tax year, applies YTD verification checks, "
-            "and generates JSON, Markdown, and CSV outputs."
-        ),
-    ):
-        annual_snapshots = collect_annual_snapshots(
-            paystubs_dir=paystubs_dir,
-            year=int(year),
-            render_scale=render_scale,
-            psm=6,
+        include_w2 = st.checkbox(
+            "Include W-2 comparison in annual packet",
+            value=True,
+            help="Disable this to build the packet from paystubs only.",
         )
-        w2_for_packet = selected_w2 if include_w2 else None
-        packet = build_tax_filing_package(
-            tax_year=int(year),
-            snapshots=annual_snapshots,
-            tolerance=tolerance,
-            w2_data=w2_for_packet,
-        )
-        st.session_state["annual_packet"] = packet
-
-    packet_data = st.session_state.get("annual_packet")
-    current_packet = None
-    if packet_data:
-        current_packet = cast(dict[str, Any], packet_data)
-    if current_packet:
-        p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Paystubs (Canonical)", current_packet["paystub_count_canonical"])
-        p2.metric("Authenticity Score", current_packet["authenticity_assessment"]["score"])
-        p3.metric("Ready To File", str(current_packet["ready_to_file"]))
-        critical_count = sum(1 for issue in current_packet["consistency_issues"] if issue["severity"] == "critical")
-        p4.metric("Critical Issues", critical_count)
-        st.caption(f"Raw paystub files analyzed: {current_packet['paystub_count_raw']}")
-
-        st.markdown("#### Consistency Issues")
-        if not current_packet["consistency_issues"]:
-            st.success("No consistency issues detected.")
+        if include_w2:
+            st.caption("Checkbox ON: annual packet includes W-2 match/mismatch checks and influences Ready To File.")
         else:
-            for issue in current_packet["consistency_issues"]:
-                prefix = "[CRITICAL]" if issue["severity"] == "critical" else "[WARNING]"
-                st.markdown(f"- {prefix} `{issue['code']}`: {issue['message']}")
+            st.caption("Checkbox OFF: annual packet is paystub-only (no W-2 comparison), useful for extraction QA.")
+        can_build_packet = st.session_state.get("w2_validation") is not None
 
-        st.markdown("#### Filing Checklist")
-        for item in current_packet["filing_checklist"]:
-            st.markdown(f"- **{item['item']}**: {item['detail']}")
+        build_button_type: ButtonKind = "primary" if active_step == 3 else "secondary"
+        build_col, info_col = st.columns([0.86, 0.14], gap="small")
+        with build_col:
+            build_packet_clicked = st.button(
+                "Build Filing Packet",
+                type=build_button_type,
+                disabled=not can_build_packet,
+            )
+        with info_col:
+            with st.popover("i", use_container_width=False):
+                st.markdown("**Build Filing Packet details**")
+                st.markdown(
+                    "- Processes all payslips for the selected tax year.\n"
+                    "- Applies YTD verification checks and consistency rules.\n"
+                    "- Generates downloadable JSON, Markdown, and CSV artifacts.\n"
+                    "- Includes W-2 checks when the checkbox is enabled."
+                )
 
-        st.markdown("#### Annual Ledger")
-        st.dataframe(current_packet["ledger"], use_container_width=True)
-        packet_ytd_flagged = [
-            {
-                "pay_date": row.get("pay_date"),
-                "file": row.get("file"),
-                "ytd_verification": row.get("ytd_verification"),
-            }
-            for row in current_packet["ledger"]
-            if row.get("ytd_verification")
-        ]
-        if packet_ytd_flagged:
-            st.warning("YTD verification flags were found in this filing packet. Check the rows below before filing.")
-            st.dataframe(packet_ytd_flagged, use_container_width=True)
+        if build_packet_clicked:
+            annual_snapshots = collect_annual_snapshots(
+                paystubs_dir=paystubs_dir,
+                year=int(year),
+                render_scale=render_scale,
+                psm=6,
+            )
+            w2_for_packet = selected_w2 if include_w2 else None
+            packet = build_tax_filing_package(
+                tax_year=int(year),
+                snapshots=annual_snapshots,
+                tolerance=tolerance,
+                w2_data=w2_for_packet,
+            )
+            st.session_state["annual_packet"] = packet
+            st.rerun()
 
-        packet_json = json.dumps(packet, indent=2)
-        packet_md = package_to_markdown(packet)
-        packet_csv = ledger_to_csv(packet["ledger"])
-        st.download_button(
-            "Download Filing Packet JSON",
-            data=packet_json,
-            file_name=f"tax_filing_package_{int(year)}.json",
-            mime="application/json",
-        )
-        st.download_button(
-            "Download Filing Packet Markdown",
-            data=packet_md,
-            file_name=f"tax_filing_package_{int(year)}.md",
-            mime="text/markdown",
-        )
-        st.download_button(
-            "Download Annual Ledger CSV",
-            data=packet_csv,
-            file_name=f"paystub_ledger_{int(year)}.csv",
-            mime="text/csv",
-        )
+        packet_data = st.session_state.get("annual_packet")
+        current_packet = None
+        if packet_data:
+            current_packet = cast(dict[str, Any], packet_data)
+        if current_packet:
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("Paystubs (Canonical)", current_packet["paystub_count_canonical"])
+            p2.metric("Authenticity Score", current_packet["authenticity_assessment"]["score"])
+            p3.metric("Ready To File", str(current_packet["ready_to_file"]))
+            critical_count = sum(1 for issue in current_packet["consistency_issues"] if issue["severity"] == "critical")
+            p4.metric("Critical Issues", critical_count)
+            st.caption(f"Raw paystub files analyzed: {current_packet['paystub_count_raw']}")
+
+            blockers: list[str] = []
+            if critical_count > 0:
+                blockers.append(f"{critical_count} critical consistency issue(s) must be resolved.")
+            if not bool(current_packet.get("ready_to_file")):
+                blockers.append("Packet is currently marked not ready to file.")
+            if int(current_packet.get("authenticity_assessment", {}).get("score", 0)) < 90:
+                blockers.append("Authenticity score is below 90; review source evidence before filing.")
+
+            st.markdown("#### Filing Decision")
+            if blockers:
+                st.error("Step 3 decision: NOT READY TO FILE")
+                for blocker in blockers:
+                    st.markdown(f"- {blocker}")
+            else:
+                st.success("Step 3 decision: READY TO FILE")
+
+            st.markdown("#### Consistency Issues")
+            if not current_packet["consistency_issues"]:
+                st.success("No consistency issues detected.")
+            else:
+                for issue in current_packet["consistency_issues"]:
+                    prefix = "[CRITICAL]" if issue["severity"] == "critical" else "[WARNING]"
+                    st.markdown(f"- {prefix} `{issue['code']}`: {issue['message']}")
+
+            st.markdown("#### Filing Checklist")
+            for item in current_packet["filing_checklist"]:
+                st.markdown(f"- **{item['item']}**: {item['detail']}")
+
+            st.markdown("#### Annual Ledger")
+            packet_ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], current_packet["ledger"]))
+            st.dataframe(
+                style_flagged_rows(
+                    packet_ledger_df,
+                    "YTD Verification",
+                    right_align_columns=[
+                        "Gross YTD",
+                        "Federal YTD",
+                        "SS YTD",
+                        "Medicare YTD",
+                        "State YTD Total",
+                    ],
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+            packet_ytd_flagged = packet_ledger_df[packet_ledger_df["YTD Verification"] != "—"]
+            if not packet_ytd_flagged.empty:
+                st.warning(
+                    "YTD verification flags were found in this filing packet. Check the rows below before filing."
+                )
+                st.dataframe(packet_ytd_flagged, use_container_width=True, hide_index=True)
+
+            packet_json = json.dumps(current_packet, indent=2)
+            packet_md = package_to_markdown(current_packet)
+            packet_csv = ledger_to_csv(current_packet["ledger"])
+            st.download_button(
+                "Download Filing Packet (JSON)",
+                data=packet_json,
+                file_name=f"tax_filing_package_{int(year)}.json",
+                mime="application/json",
+            )
+            st.download_button(
+                "Download Filing Packet (Markdown)",
+                data=packet_md,
+                file_name=f"tax_filing_package_{int(year)}.md",
+                mime="text/markdown",
+            )
+            st.download_button(
+                "Download Annual Ledger (CSV)",
+                data=packet_csv,
+                file_name=f"paystub_ledger_{int(year)}.csv",
+                mime="text/csv",
+            )
 
 
 if __name__ == "__main__":
