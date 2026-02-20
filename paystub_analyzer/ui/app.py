@@ -2353,7 +2353,35 @@ def main() -> None:
                     ledger_df = build_ledger_display_df(ledger_rows, include_calc_columns=True)
                 else:
                     ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], internal["ledger"]))
+
+                correction_trace = public.get("correction_trace", [])
+
                 if not ledger_df.empty:
+                    if correction_trace:
+                        st.markdown(f"#### ⚠️ {len(correction_trace)} Correction(s) Applied")
+                        # Emphasize that the ledger is raw but final output is corrected
+                        st.caption(
+                            "The ledger below represents raw OCR values. The final package has been explicitly overridden for the following fields:"
+                        )
+                        trace_data = []
+                        for t in correction_trace:
+                            trace_data.append(
+                                {
+                                    "Field": t.get("corrected_field"),
+                                    "Original Value": float(t.get("original_value") or 0.0),
+                                    "Corrected Value": float(t.get("corrected_value") or 0.0),
+                                    "Reason": t.get("reason"),
+                                    "Timestamp": str(t.get("timestamp"))[:19].replace("T", " "),
+                                }
+                            )
+                        import pandas as pd
+
+                        t_df = pd.DataFrame(trace_data)
+                        st.dataframe(
+                            t_df.style.set_properties(**{"background-color": "#fffbea"}),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
                     st.dataframe(ledger_df, use_container_width=True, hide_index=True)
 
                 # Markdown Report Preview
