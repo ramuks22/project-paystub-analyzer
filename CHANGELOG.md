@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta.1] - 2026-02-20
+
+### Added
+- **Household UX Maturity (Step 3)**: Unified filing package generation and display for multi-filer households in the UI.
+- **OCR Performance Yields**: Implemented SHA-256 file-hash based caching for OCR extractions using `@st.cache_data`.
+
+### Changed
+- **Hardened Data Contract**: Schema version bumped to `0.4.0`, renamed to `v0_4_0_contract.json`, and `metadata` is now a required property.
+- **Contract Compliant Corrections**: Restricted corrections editor to schema-safe keys (`box1..box6`, state taxes).
+
 ## [0.3.0-beta.1] - 2026-02-20
 
 ### Added
