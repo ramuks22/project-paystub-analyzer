@@ -36,7 +36,17 @@
     *   Better normalization heuristics.
     *   Confidence scoring.
     *   Automatic anomaly classification.
-*   **Exit Criteria**: Measurable mismatch reduction on 2025 dataset (Target: <2% false mismatches).
+*   **Exit Criteria**:
+    *   `mismatch_rate` < 2% on 2025 Gold Dataset.
+    *   `anomaly_recall_macro` >= 95%.
+    *   `anomaly_recall_weighted` >= 95%.
+    *   Zero P0/P1 regressions in v0.4.0 flows.
+    *   Local SLA: batch extractions (4-8 stubs) < 2s (warm cache, M1-reference).
+    *   CI SLA: batch extractions < 10s (GitHub Actions runner).
+*   **KPI Formulas**:
+    *   `mismatch_rate = false_mismatches / total_comparison_rows`
+    *   `anomaly_recall = detected_anomalies / total_labeled_anomalies` (Applied as Macro & Weighted).
+
 
 ## 5. v0.6.0 Contract and Compatibility (2-3 weeks)
 *   **Theme**: Stability & Governance

@@ -151,7 +151,7 @@ Analyze multiple filers (Primary + Optional Spouse) together. Supports **multipl
 
 ```json
 {
-  "version": "0.3.0",
+  "version": "0.4.0",
   "household_id": "smith_family_2025",
   "filers": [
     {
@@ -220,3 +220,9 @@ pytest -m e2e
 - `gross_pay_vs_box1_informational` is intentionally informational because Box 1 and gross pay can differ due to pre-tax treatments.
 - Use W-2 as filing source-of-truth; use paystub analysis for cross-verification and anomaly detection.
 - `.gitignore` excludes sensitive artifacts by default (paystub PDFs, W-2 PDFs/JSON payloads, and generated reports).
+
+## 🔒 Dataset Security & Governance
+This project follows strict PII-protection policies. Accuracy measurement and benchmarking utilize a "Gold Dataset" stored in `tests/fixtures/gold/`.
+- **Synthetic Manifest**: Every test asset must have a corresponding manifest entry documenting its synthetic provenance and redaction status.
+- **No Raw PII**: Unredacted or real-user paystubs must **never** be committed to the repository.
+- **Provenance Logging**: Any modification to the benchmark set must be traced back to a synthetic generator or a manual redaction event.
