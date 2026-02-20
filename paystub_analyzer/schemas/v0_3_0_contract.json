@@ -11,7 +11,8 @@
         "schema_version": {
             "type": "string",
             "enum": [
-                "0.3.0"
+                "0.3.0",
+                "0.4.0"
             ]
         },
         "household_summary": {
@@ -30,6 +31,20 @@
                 },
                 "ready_to_file": {
                     "type": "boolean"
+                }
+            }
+        },
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "filing_year": {
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "string"
+                },
+                "filing_status": {
+                    "type": "string"
                 }
             }
         },

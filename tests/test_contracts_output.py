@@ -14,7 +14,7 @@ def test_valid_v0_3_0_output_conforms_to_schema():
     Validates a sample v0.3.0 output object against the strict JSON schema.
     """
     sample_output = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
         "household_summary": {"total_gross_pay_cents": 500000, "total_fed_tax_cents": 50000, "ready_to_file": True},
         "filers": [
             {
@@ -45,7 +45,7 @@ def test_invalid_v0_3_0_output_fails_schema_missing_fields():
     Validates that v0.3.0 output missing strict required fields fails validation.
     """
     malformed_output = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
         "household_summary": {"total_gross_pay_cents": 500000, "total_fed_tax_cents": 50000, "ready_to_file": True},
         "filers": [
             {
@@ -154,7 +154,9 @@ def test_cli_output_conforms_to_contract(tmp_path):
 
     # Validate
     # 1. Check version
-    assert output_dict["schema_version"] == "0.3.0"
+    assert output_dict["schema_version"] == "0.4.0"
+    assert "metadata" in output_dict
+    assert output_dict["metadata"]["state"] == "UNKNOWN"  # From empty config in test
 
     # 2. Check Schema Compliance using the official validator
     from paystub_analyzer.utils.contracts import validate_output

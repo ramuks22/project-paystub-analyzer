@@ -30,6 +30,7 @@ from paystub_analyzer.core import (
 from paystub_analyzer import annual as annual_module
 from paystub_analyzer.w2 import build_w2_template, compare_snapshot_to_w2
 from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
+from paystub_analyzer.annual import build_household_package
 
 
 def _hash_file(path: Path) -> str:
@@ -54,7 +55,6 @@ def get_cached_w2_payload(
 build_tax_filing_package = annual_module.build_tax_filing_package
 collect_annual_snapshots = annual_module.collect_annual_snapshots
 package_to_markdown = annual_module.package_to_markdown
-build_household_package = getattr(annual_module, "build_household_package", None)
 
 APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v3"
 ButtonKind = Literal["primary", "secondary", "tertiary"]
@@ -2214,13 +2214,12 @@ def main() -> None:
                         )
 
                     allowed_fields = [
-                        "gross_pay",
-                        "federal_income_tax",
-                        "social_security_wages",
-                        "social_security_tax",
-                        "medicare_wages",
-                        "medicare_tax",
-                        "k401_contrib",
+                        "box1",
+                        "box2",
+                        "box3",
+                        "box4",
+                        "box5",
+                        "box6",
                     ]
                     states = [
                         "AL",
@@ -2282,7 +2281,7 @@ def main() -> None:
                         column_config={
                             "Field": st.column_config.SelectboxColumn(
                                 "Override Field",
-                                help="Select the exact schema key from the W-2/Filer contract",
+                                help="Select the exact W-2 Box (e.g., box1 for Wages, box2 for FIT) or state tax key",
                                 options=allowed_fields,
                                 required=True,
                             ),
@@ -2591,32 +2590,49 @@ def main() -> None:
                 )
 
         if build_packet_clicked:
-            annual_snapshots = collect_annual_snapshots(
-                paystubs_dir=paystubs_dir,
-                year=int(year),
-                render_scale=render_scale,
-                psm=6,
-            )
-            w2_for_packet = selected_w2 if include_w2 else None
+            # Use st.session_state["household_config"] as the SSOT
+            household_cfg = st.session_state["household_config"]
+
+            def packet_snapshot_loader(source_cfg: dict[str, Any]) -> list[PaystubSnapshot]:
+                p_dir = Path(source_cfg["paystubs_dir"])
+                return collect_annual_snapshots(
+                    paystubs_dir=p_dir,
+                    year=int(year),
+                    render_scale=render_scale,
+                    psm=6,
+                )
+
+            def packet_w2_loader(source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+                # If this is the active filer AND we have a W-2 session state for them, use it
+                f_id = next((f["id"] for f in household_cfg["filers"] if f["sources"] == source_cfg), None)
+                if f_id == st.session_state.get("active_filer_id"):
+                    w2_val = st.session_state.get("w2_validation")
+                    if w2_val:
+                        return cast(dict[str, Any], w2_val.get("w2_input"))
+
+                # Fallback to config-defined w2_files if present
+                w2_files = source_cfg.get("w2_files", [])
+                if w2_files:
+                    from paystub_analyzer.w2_aggregator import load_and_aggregate_w2s
+
+                    return load_and_aggregate_w2s(w2_files, Path.cwd(), int(year), render_scale)
+                return None
+
+            corrections_payload = st.session_state.get("corrections", {})
             packet_pay_date_overrides = cast(
                 dict[str, dict[str, str]],
                 st.session_state.get("pay_date_overrides", {}),
-            ).get(active_filer_id, {})
-            packet_kwargs: dict[str, Any] = {
-                "tax_year": int(year),
-                "snapshots": annual_snapshots,
-                "tolerance": tolerance,
-                "w2_data": w2_for_packet,
-            }
-            if supports_kwarg(build_tax_filing_package, "pay_date_overrides"):
-                packet_kwargs["pay_date_overrides"] = packet_pay_date_overrides
-            elif packet_pay_date_overrides:
-                st.warning(
-                    "Manual pay-date overrides require a newer backend version. "
-                    "Overrides were ignored for packet generation."
-                )
+            )
 
-            packet = build_tax_filing_package(**packet_kwargs)
+            packet = build_household_package(
+                household_config=household_cfg,
+                tax_year=int(year),
+                snapshot_loader=packet_snapshot_loader,
+                w2_loader=packet_w2_loader,
+                tolerance=tolerance,
+                corrections=corrections_payload,
+                pay_date_overrides=packet_pay_date_overrides,
+            )
             st.session_state["annual_packet"] = packet
             st.rerun()
 
@@ -2624,23 +2640,59 @@ def main() -> None:
         current_packet = None
         if packet_data:
             current_packet = cast(dict[str, Any], packet_data)
+
         if current_packet:
+            # If it's a household report (contains 'report' key from build_household_package)
+            report = current_packet.get("report", current_packet)
+            summary = report.get("household_summary", {})
+            metadata = report.get("metadata", {})
+            filers = report.get("filers", [])
+
             p1, p2, p3, p4 = st.columns(4)
-            p1.metric("Paystubs (Canonical)", current_packet["paystub_count_canonical"])
-            p2.metric("Authenticity Score", current_packet["authenticity_assessment"]["score"])
-            p3.metric("Ready To File", str(current_packet["ready_to_file"]))
-            critical_count = sum(1 for issue in current_packet["consistency_issues"] if issue["severity"] == "critical")
-            p4.metric("Critical Issues", critical_count)
-            st.caption(f"Raw paystub files analyzed: {current_packet['paystub_count_raw']}")
+            if summary:
+                # Household aggregate metrics
+                p1.metric("Total Gross Pay", format_money(Decimal(summary.get("total_gross_pay_cents", 0)) / 100))
+                p2.metric("Total Fed Tax", format_money(Decimal(summary.get("total_fed_tax_cents", 0)) / 100))
+                p3.metric("Ready To File", str(summary.get("ready_to_file", False)))
+
+                all_issues = []
+                total_canonical = 0
+                for f in filers:
+                    all_issues.extend(f.get("consistency_issues", []))
+                    total_canonical += f.get("paystub_count_canonical", 0)  # Fallback if missing
+                    # Note: count_canonical/raw are often in meta, but we might have flattened some in public
+                    # If not in public, we sum what we have.
+
+                critical_count = sum(1 for issue in all_issues if issue.get("severity") == "critical")
+                p4.metric("Total Critical Issues", critical_count)
+
+                st.caption(
+                    f"Household: {metadata.get('state', 'Unknown')} | "
+                    f"Filing Status: {metadata.get('filing_status', 'Unknown')} | "
+                    f"Year: {metadata.get('filing_year', 'Unknown')}"
+                )
+            else:
+                # Legacy single-filer fallback metrics
+                p1.metric("Paystubs (Canonical)", current_packet.get("paystub_count_canonical", 0))
+                p2.metric("Authenticity Score", current_packet.get("authenticity_assessment", {}).get("score", 0))
+                p3.metric("Ready To File", str(current_packet.get("ready_to_file", False)))
+                critical_count = sum(
+                    1 for issue in current_packet.get("consistency_issues", []) if issue.get("severity") == "critical"
+                )
+                p4.metric("Critical Issues", critical_count)
+                st.caption(f"Raw paystub files analyzed: {current_packet.get('paystub_count_raw', 0)}")
 
             blockers: list[str] = []
-            if critical_count > 0:
-                blockers.append(f"{critical_count} critical consistency issue(s) must be resolved.")
-            if not bool(current_packet.get("ready_to_file")):
-                blockers.append("Packet is currently marked not ready to file.")
-            if int(current_packet.get("authenticity_assessment", {}).get("score", 0)) < 90:
-                blockers.append("Authenticity score is below 90; review source evidence before filing.")
+            if summary:
+                if not summary.get("ready_to_file"):
+                    blockers.append("Household package is not ready to file.")
+            else:
+                if critical_count > 0:
+                    blockers.append(f"{critical_count} critical consistency issue(s) must be resolved.")
+                if not bool(current_packet.get("ready_to_file")):
+                    blockers.append("Packet is currently marked not ready to file.")
 
+            # Unified decision UI
             st.markdown("#### Filing Decision")
             if blockers:
                 st.error("Step 3 decision: NOT READY TO FILE")
@@ -2649,13 +2701,27 @@ def main() -> None:
             else:
                 st.success("Step 3 decision: READY TO FILE")
 
-            st.markdown("#### Consistency Issues")
-            if not current_packet["consistency_issues"]:
-                st.success("No consistency issues detected.")
+            if summary:
+                st.markdown("#### Multi-Filer Consistency Summary")
+                for f in filers:
+                    fid = f"{f['id']} ({f['role']})"
+                    f_issues = f.get("consistency_issues", [])
+                    if not f_issues:
+                        st.write(f"✅ **{fid}**: No issues detected.")
+                    else:
+                        st.write(f"⚠️ **{fid}**: {len(f_issues)} issue(s)")
+                        for issue in f_issues:
+                            prefix = "[CRITICAL]" if issue.get("severity") == "critical" else "[WARNING]"
+                            st.markdown(f"  - {prefix} `{issue.get('code')}`: {issue.get('message')}")
             else:
-                for issue in current_packet["consistency_issues"]:
-                    prefix = "[CRITICAL]" if issue["severity"] == "critical" else "[WARNING]"
-                    st.markdown(f"- {prefix} `{issue['code']}`: {issue['message']}")
+                st.markdown("#### Consistency Issues")
+                issues = current_packet.get("consistency_issues", [])
+                if not issues:
+                    st.success("No consistency issues detected.")
+                else:
+                    for issue in issues:
+                        prefix = "[CRITICAL]" if issue.get("severity") == "critical" else "[WARNING]"
+                        st.markdown(f"- {prefix} `{issue.get('code')}`: {issue.get('message')}")
 
             st.markdown("#### Filing Checklist")
             for item in current_packet["filing_checklist"]:

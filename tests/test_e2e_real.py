@@ -75,7 +75,7 @@ def test_annual_cli_real_execution(tmp_path, monkeypatch):
     assert output_json.exists()
     data = json.loads(output_json.read_text())
 
-    assert data["schema_version"] == "0.3.0"
+    assert data["schema_version"] == "0.4.0"
 
     # Check OCR Extraction Results (Approximate)
     # Generated Paystub had Gross 5000.00
