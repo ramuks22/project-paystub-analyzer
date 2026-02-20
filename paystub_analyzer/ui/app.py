@@ -1623,7 +1623,129 @@ def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
         )
         csv_row["state_tax_ytd_by_state"] = json.dumps(csv_row["state_tax_ytd_by_state"], sort_keys=True)
         writer.writerow(csv_row)
+        writer.writerow(csv_row)
     return buffer.getvalue()
+
+
+def render_setup_wizard() -> None:
+    st.markdown("## Household Setup Wizard")
+    st.markdown("Configure your household details to begin the analysis.")
+
+    tab1, tab2 = st.tabs(["Manual Setup", "Load Config File"])
+
+    with tab1:
+        with st.form("household_setup_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                tax_year = st.number_input("Tax Year", min_value=2000, max_value=2100, value=2025)
+            with col2:
+                states = [
+                    "AL",
+                    "AK",
+                    "AZ",
+                    "AR",
+                    "CA",
+                    "CO",
+                    "CT",
+                    "DE",
+                    "FL",
+                    "GA",
+                    "HI",
+                    "ID",
+                    "IL",
+                    "IN",
+                    "IA",
+                    "KS",
+                    "KY",
+                    "LA",
+                    "ME",
+                    "MD",
+                    "MA",
+                    "MI",
+                    "MN",
+                    "MS",
+                    "MO",
+                    "MT",
+                    "NE",
+                    "NV",
+                    "NH",
+                    "NJ",
+                    "NM",
+                    "NY",
+                    "NC",
+                    "ND",
+                    "OH",
+                    "OK",
+                    "OR",
+                    "PA",
+                    "RI",
+                    "SC",
+                    "SD",
+                    "TN",
+                    "TX",
+                    "UT",
+                    "VT",
+                    "VA",
+                    "WA",
+                    "WV",
+                    "WI",
+                    "WY",
+                ]
+                state = st.selectbox("State", states, index=4)  # Default CA
+            with col3:
+                filing_status = st.selectbox(
+                    "Filing Status", ["SINGLE", "MARRIED_JOINTLY", "MARRIED_SEPARATELY", "HEAD_OF_HOUSEHOLD", "WIDOWED"]
+                )
+
+            st.markdown("### Filers")
+            primary_dir = st.text_input("Primary Filer Paystubs Directory", value="pay_statements")
+
+            include_spouse = st.checkbox("Include Spouse?")
+            spouse_dir = ""
+            if include_spouse:
+                spouse_dir = st.text_input("Spouse Paystubs Directory", value="pay_statements_spouse")
+
+            submitted = st.form_submit_button("Start Analysis")
+            if submitted:
+                config: dict[str, Any] = {
+                    "version": "0.4.0",
+                    "household_id": f"household_{tax_year}",
+                    "filing_year": int(tax_year),
+                    "state": state,
+                    "filing_status": filing_status,
+                    "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": primary_dir}}],
+                }
+                if include_spouse and spouse_dir:
+                    config["filers"].append({"id": "spouse", "role": "SPOUSE", "sources": {"paystubs_dir": spouse_dir}})
+
+                from paystub_analyzer.utils.contracts import validate_output
+
+                try:
+                    validate_output(config, "household_config")
+                    st.session_state["household_config"] = config
+                    st.session_state["setup_valid"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Configuration error: {e}")
+
+    with tab2:
+        uploaded_file = st.file_uploader("Upload household_config.json", type=["json"])
+        if uploaded_file is not None:
+            import json
+            from paystub_analyzer.utils.migration import migrate_household_config
+            from paystub_analyzer.utils.contracts import validate_output
+
+            try:
+                cfg = migrate_household_config(json.load(uploaded_file))
+                validate_output(cfg, "household_config")
+                st.success("Valid configuration loaded!")
+
+                if st.button("Use this configuration", type="primary"):
+                    st.session_state["household_config"] = cfg
+                    st.session_state["setup_valid"] = True
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Invalid configuration file: {e}")
 
 
 def main() -> None:
@@ -1641,34 +1763,48 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    if not st.session_state.get("setup_valid"):
+        render_setup_wizard()
+        st.stop()
+
+    household_config = st.session_state["household_config"]
+    year = int(household_config.get("filing_year", 2025))
+
     with st.sidebar:
         st.header("Run Settings")
-        paystubs_dir_str = st.text_input("Paystubs directory", value="pay_statements")
-        paystubs_dir = Path(paystubs_dir_str)
-        year = st.number_input("Tax year", min_value=2000, max_value=2100, value=2025, step=1)
         render_scale = st.slider("OCR render scale", min_value=2.0, max_value=4.0, value=2.8, step=0.1)
         tolerance = Decimal(str(st.number_input("Comparison tolerance", min_value=0.0, value=0.01, step=0.01)))
 
-        # v0.3.0 Household Mode
-        household_config_path = paystubs_dir / "household_config.json"
-        household_mode = False
-        filers_list = ["primary"]
-        household_config = None
-
-        if household_config_path.exists():
-            try:
-                from paystub_analyzer.utils.migration import migrate_household_config
-
-                household_config = migrate_household_config(json.loads(household_config_path.read_text()))
-                if "filers" in household_config:
-                    household_mode = True
-                    filers_list = [f["id"] for f in household_config["filers"]]
-                    st.success(f"Household Config found ({len(filers_list)} filers)")
-            except Exception as e:
-                st.warning(f"Invalid household_config.json: {e}")
+        filers_list = [f["id"] for f in household_config["filers"]]
+        household_mode = len(filers_list) > 1
 
         selected_filer = st.selectbox("Select Filer View", filers_list)
         st.session_state["active_filer_id"] = selected_filer
+
+        st.divider()
+        if st.button("Edit Household Setup", type="secondary"):
+            st.session_state["setup_valid"] = False
+            clear_workflow_state()
+            # Strict UI namespace isolation on wizard edit
+            for key in list(st.session_state.keys()):
+                if isinstance(key, str) and (
+                    key.startswith("filer_")
+                    or key
+                    in [
+                        "snapshot",
+                        "w2_validation",
+                        "annual_packet",
+                        "household_package",
+                        "corrections",
+                    ]
+                ):
+                    del st.session_state[key]
+            st.rerun()
+
+    active_filer_id = st.session_state["active_filer_id"]
+    active_filer_cfg = next((f for f in household_config["filers"] if f["id"] == active_filer_id), None)
+    paystubs_dir_str = active_filer_cfg["sources"]["paystubs_dir"] if active_filer_cfg else "pay_statements"
+    paystubs_dir = Path(paystubs_dir_str)
 
     files = list_paystub_files(paystubs_dir, int(year))
     if not files:
