@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Multi-W2 Aggregation**: Support for summing amounts from multiple W-2 forms per filer.
 - **Strict Deduplication**: Logic to prevent processing the same W-2 twice (Idempotency).
 - **Corrections Engine**: `corrections.json` override schema with integration into the primary computation pipeline to edit YTD amounts.
-- **Real E2E Testing**: `scripts/generate_e2e_fixtures.py` and `tests/test_e2e_real.py` using `reportlab`.
+- **Real E2E Testing**: `paystub_analyzer/testing/fixtures.py` and `tests/test_e2e_real.py` using `reportlab`.
 
 ### Changed
 - **Schema Version**: Bumped output schema to `"0.3.0"`.
