@@ -13,6 +13,7 @@ VALID_ANNUAL_SUMMARY = {
             "state_tax_by_state_cents": {"CA": 5000},
             "status": "MATCH",
             "audit_flags": [],
+            "correction_trace": [],
             "w2_source_count": 1,
             "w2_aggregate": {
                 "box1_wages_cents": 10000000,

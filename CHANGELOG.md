@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta.1] - 2026-02-20
+
+### Added
+- **UI Data Editor Overrides**: Replaced static Gross Pay Override with embedded `st.data_editor` to allow simultaneous updates to `gross_pay`, `federal_income_tax`, `social_security_tax`, and `medicare_tax`.
+- **Trace Accountability**: The system now exposes a structured `correction_trace` array describing explicit field overrides.
+
+### Changed
+- **Schema**: Output contract strongly guarantees `correction_trace` metadata is present for every filer, preventing silent data edits.
+- **Reporting**: Normalized "State Tax Verification" table rules to $1.00 tolerance and explicitly tagged `MISSING (PAYSTUB)` / `MISSING (W-2)` disparities.
+
 ## [0.3.0] - 2026-02-20
 
 ### Added

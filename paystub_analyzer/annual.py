@@ -926,8 +926,8 @@ def analyze_filer(
             [err for err in filing_safety.errors]
             + [warn for warn in filing_safety.warnings]
             + (w2_data.get("processing_warnings", []) if w2_data else [])
-            + correction_audit  # Add correction logs
         ),
+        "correction_trace": correction_audit,
     }
 
     # v0.3.0 Multi-W2 Metadata
@@ -943,7 +943,17 @@ def analyze_filer(
         # So we must merge them.
         w2_agg = w2_data.get("w2_aggregate", {}).copy()
         if "state_boxes" in w2_data:
-            w2_agg["state_boxes"] = w2_data["state_boxes"]
+            translated_boxes = []
+            for sbox in w2_data["state_boxes"]:
+                wages = sbox.get("box_16_state_wages_tips")
+                taxes = sbox.get("box_17_state_income_tax")
+                w_cents = int(round(float(wages) * 100)) if wages is not None else 0
+                t_cents = int(round(float(taxes) * 100)) if taxes is not None else 0
+
+                translated_boxes.append(
+                    {"state": sbox.get("state", "??"), "wages_cents": w_cents, "tax_cents": t_cents}
+                )
+            w2_agg["state_boxes"] = translated_boxes
 
         filer_report["w2_aggregate"] = w2_agg
         filer_report["w2_sources"] = w2_data.get("w2_sources")
@@ -1175,6 +1185,9 @@ def build_tax_filing_package(
     }
 
 
+STATE_TAX_MATCH_TOLERANCE_CENTS = 100
+
+
 def package_to_markdown(package: dict[str, Any]) -> str:
     household = package["household_summary"]
 
@@ -1215,6 +1228,22 @@ def package_to_markdown(package: dict[str, Any]) -> str:
             for flag in filer["audit_flags"]:
                 lines.append(f"- {flag}")
 
+        correction_trace = filer.get("correction_trace", [])
+        if correction_trace:
+            lines.append("### Corrections & Overrides")
+            lines.append("| Field | Original | Corrected | Reason |")
+            lines.append("| :--- | :--- | :--- | :--- |")
+            for c in correction_trace:
+                field = c.get("corrected_field", "")
+                orig = c.get("original_value")
+                new_val = c.get("corrected_value")
+                reason = c.get("reason", "")
+
+                orig_str = f"${float(orig):,.2f}" if orig is not None else "—"
+                new_str = f"${float(new_val):,.2f}" if new_val is not None else "—"
+
+                lines.append(f"| `{field}` | {orig_str} | {new_str} | {reason} |")
+
         # State Tax Verification (v0.3.0 Phase 2)
         # Compare Paystub YTD vs W-2 Box 17
         paystub_states = filer.get("state_tax_by_state_cents", {})
@@ -1241,7 +1270,13 @@ def package_to_markdown(package: dict[str, Any]) -> str:
                 ps_cents = paystub_states.get(st, 0)
                 w2_cents = w2_state_map.get(st, 0)
                 diff = ps_cents - w2_cents
-                status = "MATCH" if abs(diff) < 100 else "MISMATCH"  # Tolerance $1.00? Or strict?
+
+                if st not in paystub_states:
+                    status = "MISSING (PAYSTUB)"
+                elif st not in w2_state_map:
+                    status = "MISSING (W-2)"
+                else:
+                    status = "MATCH" if abs(diff) <= STATE_TAX_MATCH_TOLERANCE_CENTS else "MISMATCH"
                 # Contracts say cents-based. Let's start with strict 0 or small epsilon.
                 # Actually, rounding issues might exist. $1.00 is reasonable for visual flag?
                 # User asked for "State Tax Verification".

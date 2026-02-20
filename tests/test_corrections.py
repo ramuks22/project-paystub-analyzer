@@ -16,7 +16,10 @@ def test_merge_basic_override():
     assert effective["gross_pay"]["ytd"] == 500.0
     assert effective["federal_income_tax"]["ytd"] == 20.0
     assert len(logs) == 1
-    assert "CORRECTION: gross_pay YTD changed from 100.0 to 500.0 (OCR Error)" in logs[0]
+    assert logs[0]["corrected_field"] == "gross_pay"
+    assert logs[0]["original_value"] == 100.0
+    assert logs[0]["corrected_value"] == 500.0
+    assert logs[0]["reason"] == "OCR Error"
 
 
 def test_merge_multiple_overrides():
@@ -46,7 +49,8 @@ def test_merge_non_dict_extracted_value():
     corrections = {"some_flat_key": {"value": 456, "audit_reason": "Override"}}
     effective, logs = merge_corrections(extracted, corrections)
     assert effective["some_flat_key"] == 456
-    assert "CORRECTION: some_flat_key changed to 456" in logs[0]
+    assert logs[0]["corrected_field"] == "some_flat_key"
+    assert logs[0]["corrected_value"] == 456
 
 
 def test_merge_box3_box5_wages():
@@ -62,8 +66,10 @@ def test_merge_box3_box5_wages():
     assert effective["social_security_wages"]["ytd"] == 11000.00
     assert effective["medicare_wages"]["ytd"] == 11000.00
     assert len(logs) == 2
-    assert "CORRECTION: social_security_wages YTD changed from None to 11000.0" in logs[0]
-    assert "CORRECTION: medicare_wages YTD changed from None to 11000.0" in logs[1]
+    assert logs[0]["corrected_field"] == "social_security_wages"
+    assert logs[0]["corrected_value"] == 11000.0
+    assert logs[1]["corrected_field"] == "medicare_wages"
+    assert logs[1]["corrected_value"] == 11000.0
 
 
 def test_merge_state_tax_nested_override():
@@ -82,8 +88,10 @@ def test_merge_state_tax_nested_override():
     assert effective["state_income_tax"]["NY"]["ytd"] == 500.00  # newly added
 
     assert len(logs) == 2
-    assert "CORRECTION: state_income_tax (VA) YTD changed from 2000.0 to 2500.0" in logs[0]
-    assert "CORRECTION: state_income_tax (NY) YTD changed from None to 500.0" in logs[1]
+    assert logs[0]["corrected_field"] == "state_income_tax_VA"
+    assert logs[0]["corrected_value"] == 2500.0
+    assert logs[1]["corrected_field"] == "state_income_tax_NY"
+    assert logs[1]["corrected_value"] == 500.0
 
 
 def test_merge_bare_state_tax_skips():
@@ -100,4 +108,5 @@ def test_merge_bare_state_tax_skips():
 
     # Assert nothing was corrupted
     assert effective["state_income_tax"]["VA"]["ytd"] == 2000.00
-    assert "WARNING: Cannot override bare 'state_income_tax'" in logs[0]
+    assert "WARNING: Cannot override bare" in logs[0]["reason"]
+    assert logs[0]["corrected_field"] == "state_income_tax"

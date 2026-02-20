@@ -61,4 +61,27 @@ def test_reporting_state_tax_missing_w2():
     }
 
     md = package_to_markdown(package)
-    assert "| CA | $10.00 | — | $10.00 | MISMATCH |" in md
+    assert "| CA | $10.00 | — | $10.00 | MISSING (W-2) |" in md
+
+
+def test_reporting_state_tax_missing_paystub():
+    # Case where paystub is missing a state present on W-2
+    package = {
+        "schema_version": "0.3.0",
+        "household_summary": {"total_gross_pay_cents": 0, "total_fed_tax_cents": 0, "ready_to_file": False},
+        "filers": [
+            {
+                "id": "primary",
+                "role": "PRIMARY",
+                "gross_pay_cents": 0,
+                "fed_tax_cents": 0,
+                "status": "REVIEW_NEEDED",
+                "state_tax_by_state_cents": {},
+                "w2_aggregate": {"state_boxes": [{"state": "NY", "box_17_state_income_tax": 25.00}]},
+            }
+        ],
+    }
+
+    md = package_to_markdown(package)
+    # ps_cents = 0, w2_cents = 2500, diff = -2500 -> diff string is $-25.00
+    assert "| NY | — | $25.00 | $-25.00 | MISSING (PAYSTUB) |" in md

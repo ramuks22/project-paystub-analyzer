@@ -40,8 +40,15 @@
                 "required": [
                     "id",
                     "role",
+                    "gross_pay_cents",
+                    "fed_tax_cents",
+                    "state_tax_by_state_cents",
+                    "status",
+                    "audit_flags",
+                    "correction_trace",
                     "w2_aggregate",
-                    "w2_sources"
+                    "w2_sources",
+                    "w2_source_count"
                 ],
                 "properties": {
                     "id": {
@@ -49,6 +56,60 @@
                     },
                     "role": {
                         "type": "string"
+                    },
+                    "gross_pay_cents": {
+                        "type": "integer"
+                    },
+                    "fed_tax_cents": {
+                        "type": "integer"
+                    },
+                    "state_tax_by_state_cents": {
+                        "type": "object",
+                        "patternProperties": {
+                            "^[A-Z]{2}$": {
+                                "type": "integer"
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "MATCH",
+                            "REVIEW_NEEDED",
+                            "MISMATCH",
+                            "ERROR"
+                        ]
+                    },
+                    "audit_flags": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "correction_trace": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": [
+                                "corrected_field",
+                                "reason",
+                                "timestamp"
+                            ],
+                            "properties": {
+                                "corrected_field": {
+                                    "type": "string"
+                                },
+                                "original_value": {},
+                                "corrected_value": {},
+                                "reason": {
+                                    "type": "string"
+                                },
+                                "timestamp": {
+                                    "type": "string"
+                                }
+                            }
+                        }
                     },
                     "w2_aggregate": {
                         "type": "object",
@@ -62,6 +123,28 @@
                             },
                             "box2_fed_tax_cents": {
                                 "type": "integer"
+                            },
+                            "state_boxes": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "state",
+                                        "wages_cents",
+                                        "tax_cents"
+                                    ],
+                                    "properties": {
+                                        "state": {
+                                            "type": "string"
+                                        },
+                                        "wages_cents": {
+                                            "type": "integer"
+                                        },
+                                        "tax_cents": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
                             }
                         }
                     },

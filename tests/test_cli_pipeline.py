@@ -69,3 +69,56 @@ def test_annual_cli_pipeline(mock_ocr_text, tmp_path, capsys):
     primary = data["filers"][0]
     # 2,400.00 -> 240,000 cents
     assert primary["state_tax_by_state_cents"]["VA"] == 240000
+
+
+@pytest.mark.e2e
+def test_annual_cli_pipeline_with_corrections(mock_ocr_text, tmp_path, capsys):
+    """
+    E2E Pipeline Test with Corrections override.
+    Verifies that --corrections-json successfully patches the OCR output
+    and populates `correction_trace` correctly.
+    """
+    paystubs_dir = tmp_path / "paystubs"
+    paystubs_dir.mkdir()
+    (paystubs_dir / "Pay Date 2025-12-31.pdf").write_text("dummy pdf content", encoding="utf-8")
+
+    output_json = tmp_path / "package.json"
+
+    corrections_json = tmp_path / "corrections.json"
+    corrections_json.write_text(
+        json.dumps({"primary": {"box1": {"value": 70000.00, "audit_reason": "Corrected W-2 match"}}}), encoding="utf-8"
+    )
+
+    with patch("paystub_analyzer.core.ocr_first_page", return_value=mock_ocr_text):
+        test_args = [
+            "paystub-annual",
+            "--year",
+            "2025",
+            "--paystubs-dir",
+            str(paystubs_dir),
+            "--package-json-out",
+            str(output_json),
+            "--corrections-json",
+            str(corrections_json),
+        ]
+
+        with patch("sys.argv", test_args):
+            try:
+                annual_main()
+            except SystemExit as e:
+                assert e.code == 0 or e.code is None
+
+    assert output_json.exists()
+    data = json.loads(output_json.read_text(encoding="utf-8"))
+
+    # Verify OCR value was overridden: 70,000.00 -> 7,000,000 cents
+    assert data["household_summary"]["total_gross_pay_cents"] == 7000000
+
+    primary = data["filers"][0]
+    assert primary["gross_pay_cents"] == 7000000
+
+    correction_trace = primary.get("correction_trace", [])
+    assert len(correction_trace) == 1
+    assert correction_trace[0]["corrected_field"] == "gross_pay"
+    assert correction_trace[0]["corrected_value"] == 70000.0
+    assert correction_trace[0]["reason"] == "Corrected W-2 match"

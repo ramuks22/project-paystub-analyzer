@@ -2033,34 +2033,71 @@ def main() -> None:
                 # Corrections UI
                 with st.expander("Values Verification & Corrections"):
                     st.info("Overrides applied here will be reflected in the final filing package.")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        # Simple example: Gross Pay Override
-                        curr_gross = extracted["gross_pay"].get("ytd", 0.0)
-                        # Check if already corrected? extracted values ARE effective values in v0.3.0
-                        # But we want to show the underlying correctable value.
-                        # Ideally we show "Original" vs "Effective".
-                        # But `extracted` is already merged.
-                        # So showing `curr_gross` is fine.
 
-                        new_gross = st.number_input(
-                            "Gross Pay YTD",
-                            value=float(curr_gross or 0.0),
-                            step=0.01,
-                            key=f"corr_gross_{active_filer_id}_{st.session_state.get('_run_id', 0)}",
-                        )
-                        if new_gross != float(curr_gross or 0.0):
-                            if st.button("Apply Correction", key=f"apply_{active_filer_id}"):
-                                if "corrections" not in st.session_state:
-                                    st.session_state["corrections"] = {}
-                                if active_filer_id not in st.session_state["corrections"]:
-                                    st.session_state["corrections"][active_filer_id] = {}
+                    editable_fields = [
+                        {
+                            "Field": "gross_pay",
+                            "Internal": "gross_pay",
+                            "YTD": float(extracted["gross_pay"].get("ytd") or 0.0),
+                        },
+                        {
+                            "Field": "federal_income_tax",
+                            "Internal": "federal_income_tax",
+                            "YTD": float(extracted["federal_income_tax"].get("ytd") or 0.0),
+                        },
+                        {
+                            "Field": "social_security_tax",
+                            "Internal": "social_security_tax",
+                            "YTD": float(extracted["social_security_tax"].get("ytd") or 0.0),
+                        },
+                        {
+                            "Field": "medicare_tax",
+                            "Internal": "medicare_tax",
+                            "YTD": float(extracted["medicare_tax"].get("ytd") or 0.0),
+                        },
+                    ]
 
-                                st.session_state["corrections"][active_filer_id]["gross_pay"] = {
-                                    "value": new_gross,
+                    # Hide "Internal" key from UI
+                    display_data = [{"Field": f["Field"], "YTD": f["YTD"]} for f in editable_fields]
+
+                    edited_data = st.data_editor(
+                        display_data,
+                        column_config={
+                            "Field": st.column_config.TextColumn("Tax Liability", disabled=True),
+                            "YTD": st.column_config.NumberColumn(
+                                "Corrected YTD", min_value=0.0, step=0.01, format="$%.2f"
+                            ),
+                        },
+                        hide_index=True,
+                        use_container_width=True,
+                        key=f"corrections_editor_{active_filer_id}_{st.session_state.get('_run_id', 0)}",
+                    )
+
+                    if st.button("Apply Corrections", key=f"apply_corrections_{active_filer_id}", type="primary"):
+                        if "corrections" not in st.session_state:
+                            st.session_state["corrections"] = {}
+                        if active_filer_id not in st.session_state["corrections"]:
+                            st.session_state["corrections"][active_filer_id] = {}
+
+                        changed = False
+                        for orig, edited in zip(editable_fields, edited_data):
+                            new_val_raw_str = str(edited.get("YTD"))
+
+                            # Skip bad parses
+                            try:
+                                new_val = float(new_val_raw_str)
+                            except ValueError:
+                                continue
+
+                            if orig["YTD"] != new_val:
+                                st.session_state["corrections"][active_filer_id][orig["Internal"]] = {
+                                    "value": float(new_val),
                                     "audit_reason": "Manual UI Override",
                                 }
-                                st.rerun()
+                                changed = True
+
+                        if changed:
+                            st.rerun()
 
                 y1, y2, y3, y4 = st.columns(4)
                 with y1:

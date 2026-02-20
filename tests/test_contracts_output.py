@@ -23,6 +23,9 @@ def test_valid_v0_3_0_output_conforms_to_schema():
                 "status": "MATCH",
                 "gross_pay_cents": 500000,
                 "fed_tax_cents": 50000,
+                "state_tax_by_state_cents": {"VA": 25000},
+                "audit_flags": ["Test Audit Log"],
+                "correction_trace": [],
                 "w2_source_count": 1,
                 "w2_aggregate": {"box1_wages_cents": 500000, "box2_fed_tax_cents": 50000},
                 "w2_sources": [
@@ -34,6 +37,29 @@ def test_valid_v0_3_0_output_conforms_to_schema():
 
     # Should not raise Validation Error
     jsonschema.validate(instance=sample_output, schema=SCHEMA)
+
+
+@pytest.mark.unit
+def test_invalid_v0_3_0_output_fails_schema_missing_fields():
+    """
+    Validates that v0.3.0 output missing strict required fields fails validation.
+    """
+    malformed_output = {
+        "schema_version": "0.3.0",
+        "household_summary": {"total_gross_pay_cents": 500000, "total_fed_tax_cents": 50000, "ready_to_file": True},
+        "filers": [
+            {
+                "id": "primary",
+                "role": "PRIMARY",
+                # Missing gross_pay_cents, fed_tax_cents, state_tax_by_state_cents, status, audit_flags, w2_source_count
+                "w2_aggregate": {"box1_wages_cents": 500000, "box2_fed_tax_cents": 50000},
+                "w2_sources": [],
+            }
+        ],
+    }
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=malformed_output, schema=SCHEMA)
 
 
 @pytest.mark.unit
@@ -204,13 +230,13 @@ def test_corrections_integration_flow(tmp_path):
     # Corrected 6000.00 -> Cents 600000
     assert filer["gross_pay_cents"] == 600000
 
-    # 2. Check Audit Flags
-    audit_flags = filer.get("audit_flags", [])
-    # Convert flags to string for easier check or iterate
-    # "CORRECTION: gross_pay YTD changed..."
-    flags_str = str(audit_flags)
-    assert "CORRECTION" in flags_str
-    assert "6000.0" in flags_str
+    # 2. Check Correction Trace
+    correction_trace = filer.get("correction_trace", [])
+    assert len(correction_trace) == 1
+    trace = correction_trace[0]
+    assert trace["corrected_field"] == "gross_pay"
+    assert trace["corrected_value"] == 6000.00
+    assert trace["reason"] == "Manual Override Integration Test"
 
     # 3. Check Schema Compliance
     validate_output(output_dict, "v0_3_0_contract", mode="FILING")
