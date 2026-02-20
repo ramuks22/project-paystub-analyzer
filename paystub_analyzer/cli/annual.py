@@ -150,9 +150,9 @@ def main() -> None:
         household_config = read_json(args.household_config)
 
         # Migrate v0.2 -> v0.3
-        from paystub_analyzer.utils.migration import migrate_household_config_v0_2_to_v0_3
+        from paystub_analyzer.utils.migration import migrate_household_config
 
-        household_config = migrate_household_config_v0_2_to_v0_3(household_config)
+        household_config = migrate_household_config(household_config)
 
         # Validate Input Contract
         try:

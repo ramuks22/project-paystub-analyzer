@@ -30,11 +30,31 @@ from paystub_analyzer.core import (
 from paystub_analyzer import annual as annual_module
 from paystub_analyzer.w2 import build_w2_template, compare_snapshot_to_w2
 from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
+from paystub_analyzer.annual import build_household_package
+
+
+def _hash_file(path: Path) -> str:
+    import hashlib
+
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_paystub_snapshot(path_str: str, file_hash: str, render_scale: float) -> PaystubSnapshot:
+    return extract_paystub_snapshot(Path(path_str), render_scale=render_scale)
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_w2_payload(
+    pdf_path_str: str, file_hash: str, render_scale: float, psm: int, fallback_year: int
+) -> dict[str, Any]:
+    return w2_pdf_to_json_payload(Path(pdf_path_str), render_scale=render_scale, psm=psm, fallback_year=fallback_year)
+
 
 build_tax_filing_package = annual_module.build_tax_filing_package
 collect_annual_snapshots = annual_module.collect_annual_snapshots
 package_to_markdown = annual_module.package_to_markdown
-build_household_package = getattr(annual_module, "build_household_package", None)
 
 APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v3"
 ButtonKind = Literal["primary", "secondary", "tertiary"]
@@ -1623,7 +1643,129 @@ def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
         )
         csv_row["state_tax_ytd_by_state"] = json.dumps(csv_row["state_tax_ytd_by_state"], sort_keys=True)
         writer.writerow(csv_row)
+        writer.writerow(csv_row)
     return buffer.getvalue()
+
+
+def render_setup_wizard() -> None:
+    st.markdown("## Household Setup Wizard")
+    st.markdown("Configure your household details to begin the analysis.")
+
+    tab1, tab2 = st.tabs(["Manual Setup", "Load Config File"])
+
+    with tab1:
+        with st.form("household_setup_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                tax_year = st.number_input("Tax Year", min_value=2000, max_value=2100, value=2025)
+            with col2:
+                states = [
+                    "AL",
+                    "AK",
+                    "AZ",
+                    "AR",
+                    "CA",
+                    "CO",
+                    "CT",
+                    "DE",
+                    "FL",
+                    "GA",
+                    "HI",
+                    "ID",
+                    "IL",
+                    "IN",
+                    "IA",
+                    "KS",
+                    "KY",
+                    "LA",
+                    "ME",
+                    "MD",
+                    "MA",
+                    "MI",
+                    "MN",
+                    "MS",
+                    "MO",
+                    "MT",
+                    "NE",
+                    "NV",
+                    "NH",
+                    "NJ",
+                    "NM",
+                    "NY",
+                    "NC",
+                    "ND",
+                    "OH",
+                    "OK",
+                    "OR",
+                    "PA",
+                    "RI",
+                    "SC",
+                    "SD",
+                    "TN",
+                    "TX",
+                    "UT",
+                    "VT",
+                    "VA",
+                    "WA",
+                    "WV",
+                    "WI",
+                    "WY",
+                ]
+                state = st.selectbox("State", states, index=4)  # Default CA
+            with col3:
+                filing_status = st.selectbox(
+                    "Filing Status", ["SINGLE", "MARRIED_JOINTLY", "MARRIED_SEPARATELY", "HEAD_OF_HOUSEHOLD", "WIDOWED"]
+                )
+
+            st.markdown("### Filers")
+            primary_dir = st.text_input("Primary Filer Paystubs Directory", value="pay_statements")
+
+            include_spouse = st.checkbox("Include Spouse?")
+            spouse_dir = ""
+            if include_spouse:
+                spouse_dir = st.text_input("Spouse Paystubs Directory", value="pay_statements_spouse")
+
+            submitted = st.form_submit_button("Start Analysis")
+            if submitted:
+                config: dict[str, Any] = {
+                    "version": "0.4.0",
+                    "household_id": f"household_{tax_year}",
+                    "filing_year": int(tax_year),
+                    "state": state,
+                    "filing_status": filing_status,
+                    "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": primary_dir}}],
+                }
+                if include_spouse and spouse_dir:
+                    config["filers"].append({"id": "spouse", "role": "SPOUSE", "sources": {"paystubs_dir": spouse_dir}})
+
+                from paystub_analyzer.utils.contracts import validate_output
+
+                try:
+                    validate_output(config, "household_config")
+                    st.session_state["household_config"] = config
+                    st.session_state["setup_valid"] = True
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Configuration error: {e}")
+
+    with tab2:
+        uploaded_file = st.file_uploader("Upload household_config.json", type=["json"])
+        if uploaded_file is not None:
+            import json
+            from paystub_analyzer.utils.migration import migrate_household_config
+            from paystub_analyzer.utils.contracts import validate_output
+
+            try:
+                cfg = migrate_household_config(json.load(uploaded_file))
+                validate_output(cfg, "household_config")
+                st.success("Valid configuration loaded!")
+
+                if st.button("Use this configuration", type="primary"):
+                    st.session_state["household_config"] = cfg
+                    st.session_state["setup_valid"] = True
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Invalid configuration file: {e}")
 
 
 def main() -> None:
@@ -1641,32 +1783,48 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    if not st.session_state.get("setup_valid"):
+        render_setup_wizard()
+        st.stop()
+
+    household_config = st.session_state["household_config"]
+    year = int(household_config.get("filing_year", 2025))
+
     with st.sidebar:
         st.header("Run Settings")
-        paystubs_dir_str = st.text_input("Paystubs directory", value="pay_statements")
-        paystubs_dir = Path(paystubs_dir_str)
-        year = st.number_input("Tax year", min_value=2000, max_value=2100, value=2025, step=1)
         render_scale = st.slider("OCR render scale", min_value=2.0, max_value=4.0, value=2.8, step=0.1)
         tolerance = Decimal(str(st.number_input("Comparison tolerance", min_value=0.0, value=0.01, step=0.01)))
 
-        # v0.3.0 Household Mode
-        household_config_path = paystubs_dir / "household_config.json"
-        household_mode = False
-        filers_list = ["primary"]
-        household_config = None
-
-        if household_config_path.exists():
-            try:
-                household_config = json.loads(household_config_path.read_text())
-                if "filers" in household_config:
-                    household_mode = True
-                    filers_list = [f["id"] for f in household_config["filers"]]
-                    st.success(f"Household Config found ({len(filers_list)} filers)")
-            except Exception as e:
-                st.warning(f"Invalid household_config.json: {e}")
+        filers_list = [f["id"] for f in household_config["filers"]]
+        household_mode = len(filers_list) > 1
 
         selected_filer = st.selectbox("Select Filer View", filers_list)
         st.session_state["active_filer_id"] = selected_filer
+
+        st.divider()
+        if st.button("Edit Household Setup", type="secondary"):
+            st.session_state["setup_valid"] = False
+            clear_workflow_state()
+            # Strict UI namespace isolation on wizard edit
+            for key in list(st.session_state.keys()):
+                if isinstance(key, str) and (
+                    key.startswith("filer_")
+                    or key
+                    in [
+                        "snapshot",
+                        "w2_validation",
+                        "annual_packet",
+                        "household_package",
+                        "corrections",
+                    ]
+                ):
+                    del st.session_state[key]
+            st.rerun()
+
+    active_filer_id = st.session_state["active_filer_id"]
+    active_filer_cfg = next((f for f in household_config["filers"] if f["id"] == active_filer_id), None)
+    paystubs_dir_str = active_filer_cfg["sources"]["paystubs_dir"] if active_filer_cfg else "pay_statements"
+    paystubs_dir = Path(paystubs_dir_str)
 
     files = list_paystub_files(paystubs_dir, int(year))
     if not files:
@@ -1922,7 +2080,8 @@ def main() -> None:
                         raw_count = 0 if household_mode else preview_paystub_count
 
                     else:
-                        snapshot = extract_paystub_snapshot(Path(selected), render_scale=render_scale)
+                        file_hash = _hash_file(Path(selected))
+                        snapshot = get_cached_paystub_snapshot(str(selected), file_hash, render_scale)
                         st.session_state["snapshot"] = snapshot
                         st.session_state.pop("annual_summary_preview", None)
                         st.session_state["analysis_scope"] = "single"
@@ -2034,40 +2193,104 @@ def main() -> None:
                 with st.expander("Values Verification & Corrections"):
                     st.info("Overrides applied here will be reflected in the final filing package.")
 
-                    editable_fields = [
-                        {
-                            "Field": "gross_pay",
-                            "Internal": "gross_pay",
-                            "YTD": float(extracted["gross_pay"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "federal_income_tax",
-                            "Internal": "federal_income_tax",
-                            "YTD": float(extracted["federal_income_tax"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "social_security_tax",
-                            "Internal": "social_security_tax",
-                            "YTD": float(extracted["social_security_tax"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "medicare_tax",
-                            "Internal": "medicare_tax",
-                            "YTD": float(extracted["medicare_tax"].get("ytd") or 0.0),
-                        },
+                    existing_corrections = st.session_state.get("corrections", {}).get(active_filer_id, {})
+                    editor_rows = []
+                    for k, v in existing_corrections.items():
+                        editor_rows.append(
+                            {
+                                "Field": k,
+                                "Value": float(v.get("value", 0.0)),
+                                "Reason": v.get("audit_reason", "Manual UI Override"),
+                            }
+                        )
+
+                    import pandas as pd
+
+                    df_corrections = pd.DataFrame(editor_rows, columns=["Field", "Value", "Reason"])
+                    if df_corrections.empty:
+                        # Start with one empty row to make the UI obvious
+                        df_corrections = pd.DataFrame(
+                            [{"Field": None, "Value": None, "Reason": ""}], columns=["Field", "Value", "Reason"]
+                        )
+
+                    allowed_fields = [
+                        "box1",
+                        "box2",
+                        "box3",
+                        "box4",
+                        "box5",
+                        "box6",
                     ]
+                    states = [
+                        "AL",
+                        "AK",
+                        "AZ",
+                        "AR",
+                        "CA",
+                        "CO",
+                        "CT",
+                        "DE",
+                        "FL",
+                        "GA",
+                        "HI",
+                        "ID",
+                        "IL",
+                        "IN",
+                        "IA",
+                        "KS",
+                        "KY",
+                        "LA",
+                        "ME",
+                        "MD",
+                        "MA",
+                        "MI",
+                        "MN",
+                        "MS",
+                        "MO",
+                        "MT",
+                        "NE",
+                        "NV",
+                        "NH",
+                        "NJ",
+                        "NM",
+                        "NY",
+                        "NC",
+                        "ND",
+                        "OH",
+                        "OK",
+                        "OR",
+                        "PA",
+                        "RI",
+                        "SC",
+                        "SD",
+                        "TN",
+                        "TX",
+                        "UT",
+                        "VT",
+                        "VA",
+                        "WA",
+                        "WV",
+                        "WI",
+                        "WY",
+                    ]
+                    for s in states:
+                        allowed_fields.append(f"state_income_tax_{s}")
 
-                    # Hide "Internal" key from UI
-                    display_data = [{"Field": f["Field"], "YTD": f["YTD"]} for f in editable_fields]
-
-                    edited_data = st.data_editor(
-                        display_data,
+                    edited_df = st.data_editor(
+                        df_corrections,
                         column_config={
-                            "Field": st.column_config.TextColumn("Tax Liability", disabled=True),
-                            "YTD": st.column_config.NumberColumn(
-                                "Corrected YTD", min_value=0.0, step=0.01, format="$%.2f"
+                            "Field": st.column_config.SelectboxColumn(
+                                "Override Field",
+                                help="Select the exact W-2 Box (e.g., box1 for Wages, box2 for FIT) or state tax key",
+                                options=allowed_fields,
+                                required=True,
                             ),
+                            "Value": st.column_config.NumberColumn(
+                                "Corrected YTD", min_value=0.0, step=0.01, format="$%.2f", required=True
+                            ),
+                            "Reason": st.column_config.TextColumn("Audit Reason", required=True),
                         },
+                        num_rows="dynamic",
                         hide_index=True,
                         use_container_width=True,
                         key=f"corrections_editor_{active_filer_id}_{st.session_state.get('_run_id', 0)}",
@@ -2076,27 +2299,28 @@ def main() -> None:
                     if st.button("Apply Corrections", key=f"apply_corrections_{active_filer_id}", type="primary"):
                         if "corrections" not in st.session_state:
                             st.session_state["corrections"] = {}
-                        if active_filer_id not in st.session_state["corrections"]:
-                            st.session_state["corrections"][active_filer_id] = {}
 
-                        changed = False
-                        for orig, edited in zip(editable_fields, edited_data):
-                            new_val_raw_str = str(edited.get("YTD"))
+                        new_corrections = {}
+                        for idx, row in edited_df.iterrows():
+                            field = row.get("Field")
+                            val = row.get("Value")
+                            reason = row.get("Reason")
 
-                            # Skip bad parses
-                            try:
-                                new_val = float(new_val_raw_str)
-                            except ValueError:
+                            if not field or pd.isna(val) or pd.isna(field):
                                 continue
 
-                            if orig["YTD"] != new_val:
-                                st.session_state["corrections"][active_filer_id][orig["Internal"]] = {
-                                    "value": float(new_val),
-                                    "audit_reason": "Manual UI Override",
-                                }
-                                changed = True
+                            try:
+                                val_float = float(val)
+                            except (ValueError, TypeError):
+                                continue
 
-                        if changed:
+                            if pd.isna(reason) or str(reason).strip() == "":
+                                reason = "Manual UI Override"
+
+                            new_corrections[str(field)] = {"value": val_float, "audit_reason": str(reason).strip()}
+
+                        if new_corrections != existing_corrections:
+                            st.session_state["corrections"][active_filer_id] = new_corrections
                             st.rerun()
 
                 y1, y2, y3, y4 = st.columns(4)
@@ -2149,7 +2373,35 @@ def main() -> None:
                     ledger_df = build_ledger_display_df(ledger_rows, include_calc_columns=True)
                 else:
                     ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], internal["ledger"]))
+
+                correction_trace = public.get("correction_trace", [])
+
                 if not ledger_df.empty:
+                    if correction_trace:
+                        st.markdown(f"#### ⚠️ {len(correction_trace)} Correction(s) Applied")
+                        # Emphasize that the ledger is raw but final output is corrected
+                        st.caption(
+                            "The ledger below represents raw OCR values. The final package has been explicitly overridden for the following fields:"
+                        )
+                        trace_data = []
+                        for t in correction_trace:
+                            trace_data.append(
+                                {
+                                    "Field": t.get("corrected_field"),
+                                    "Original Value": float(t.get("original_value") or 0.0),
+                                    "Corrected Value": float(t.get("corrected_value") or 0.0),
+                                    "Reason": t.get("reason"),
+                                    "Timestamp": str(t.get("timestamp"))[:19].replace("T", " "),
+                                }
+                            )
+                        import pandas as pd
+
+                        t_df = pd.DataFrame(trace_data)
+                        st.dataframe(
+                            t_df.style.set_properties(**{"background-color": "#fffbea"}),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
                     st.dataframe(ledger_df, use_container_width=True, hide_index=True)
 
                 # Markdown Report Preview
@@ -2213,8 +2465,10 @@ def main() -> None:
                 temp_pdf.write(uploaded_bytes)
                 temp_path = Path(temp_pdf.name)
             try:
-                w2_data = w2_pdf_to_json_payload(
-                    pdf_path=temp_path,
+                file_hash = _hash_file(temp_path)
+                w2_data = get_cached_w2_payload(
+                    pdf_path_str=str(temp_path),
+                    file_hash=file_hash,
                     render_scale=max(render_scale, 3.0),
                     psm=6,
                     fallback_year=int(year),
@@ -2336,32 +2590,49 @@ def main() -> None:
                 )
 
         if build_packet_clicked:
-            annual_snapshots = collect_annual_snapshots(
-                paystubs_dir=paystubs_dir,
-                year=int(year),
-                render_scale=render_scale,
-                psm=6,
-            )
-            w2_for_packet = selected_w2 if include_w2 else None
+            # Use st.session_state["household_config"] as the SSOT
+            household_cfg = st.session_state["household_config"]
+
+            def packet_snapshot_loader(source_cfg: dict[str, Any]) -> list[PaystubSnapshot]:
+                p_dir = Path(source_cfg["paystubs_dir"])
+                return collect_annual_snapshots(
+                    paystubs_dir=p_dir,
+                    year=int(year),
+                    render_scale=render_scale,
+                    psm=6,
+                )
+
+            def packet_w2_loader(source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+                # If this is the active filer AND we have a W-2 session state for them, use it
+                f_id = next((f["id"] for f in household_cfg["filers"] if f["sources"] == source_cfg), None)
+                if f_id == st.session_state.get("active_filer_id"):
+                    w2_val = st.session_state.get("w2_validation")
+                    if w2_val:
+                        return cast(dict[str, Any], w2_val.get("w2_input"))
+
+                # Fallback to config-defined w2_files if present
+                w2_files = source_cfg.get("w2_files", [])
+                if w2_files:
+                    from paystub_analyzer.w2_aggregator import load_and_aggregate_w2s
+
+                    return load_and_aggregate_w2s(w2_files, Path.cwd(), int(year), render_scale)
+                return None
+
+            corrections_payload = st.session_state.get("corrections", {})
             packet_pay_date_overrides = cast(
                 dict[str, dict[str, str]],
                 st.session_state.get("pay_date_overrides", {}),
-            ).get(active_filer_id, {})
-            packet_kwargs: dict[str, Any] = {
-                "tax_year": int(year),
-                "snapshots": annual_snapshots,
-                "tolerance": tolerance,
-                "w2_data": w2_for_packet,
-            }
-            if supports_kwarg(build_tax_filing_package, "pay_date_overrides"):
-                packet_kwargs["pay_date_overrides"] = packet_pay_date_overrides
-            elif packet_pay_date_overrides:
-                st.warning(
-                    "Manual pay-date overrides require a newer backend version. "
-                    "Overrides were ignored for packet generation."
-                )
+            )
 
-            packet = build_tax_filing_package(**packet_kwargs)
+            packet = build_household_package(
+                household_config=household_cfg,
+                tax_year=int(year),
+                snapshot_loader=packet_snapshot_loader,
+                w2_loader=packet_w2_loader,
+                tolerance=tolerance,
+                corrections=corrections_payload,
+                pay_date_overrides=packet_pay_date_overrides,
+            )
             st.session_state["annual_packet"] = packet
             st.rerun()
 
@@ -2369,23 +2640,59 @@ def main() -> None:
         current_packet = None
         if packet_data:
             current_packet = cast(dict[str, Any], packet_data)
+
         if current_packet:
+            # If it's a household report (contains 'report' key from build_household_package)
+            report = current_packet.get("report", current_packet)
+            summary = report.get("household_summary", {})
+            metadata = report.get("metadata", {})
+            filers = report.get("filers", [])
+
             p1, p2, p3, p4 = st.columns(4)
-            p1.metric("Paystubs (Canonical)", current_packet["paystub_count_canonical"])
-            p2.metric("Authenticity Score", current_packet["authenticity_assessment"]["score"])
-            p3.metric("Ready To File", str(current_packet["ready_to_file"]))
-            critical_count = sum(1 for issue in current_packet["consistency_issues"] if issue["severity"] == "critical")
-            p4.metric("Critical Issues", critical_count)
-            st.caption(f"Raw paystub files analyzed: {current_packet['paystub_count_raw']}")
+            if summary:
+                # Household aggregate metrics
+                p1.metric("Total Gross Pay", format_money(Decimal(summary.get("total_gross_pay_cents", 0)) / 100))
+                p2.metric("Total Fed Tax", format_money(Decimal(summary.get("total_fed_tax_cents", 0)) / 100))
+                p3.metric("Ready To File", str(summary.get("ready_to_file", False)))
+
+                all_issues = []
+                total_canonical = 0
+                for f in filers:
+                    all_issues.extend(f.get("consistency_issues", []))
+                    total_canonical += f.get("paystub_count_canonical", 0)  # Fallback if missing
+                    # Note: count_canonical/raw are often in meta, but we might have flattened some in public
+                    # If not in public, we sum what we have.
+
+                critical_count = sum(1 for issue in all_issues if issue.get("severity") == "critical")
+                p4.metric("Total Critical Issues", critical_count)
+
+                st.caption(
+                    f"Household: {metadata.get('state', 'Unknown')} | "
+                    f"Filing Status: {metadata.get('filing_status', 'Unknown')} | "
+                    f"Year: {metadata.get('filing_year', 'Unknown')}"
+                )
+            else:
+                # Legacy single-filer fallback metrics
+                p1.metric("Paystubs (Canonical)", current_packet.get("paystub_count_canonical", 0))
+                p2.metric("Authenticity Score", current_packet.get("authenticity_assessment", {}).get("score", 0))
+                p3.metric("Ready To File", str(current_packet.get("ready_to_file", False)))
+                critical_count = sum(
+                    1 for issue in current_packet.get("consistency_issues", []) if issue.get("severity") == "critical"
+                )
+                p4.metric("Critical Issues", critical_count)
+                st.caption(f"Raw paystub files analyzed: {current_packet.get('paystub_count_raw', 0)}")
 
             blockers: list[str] = []
-            if critical_count > 0:
-                blockers.append(f"{critical_count} critical consistency issue(s) must be resolved.")
-            if not bool(current_packet.get("ready_to_file")):
-                blockers.append("Packet is currently marked not ready to file.")
-            if int(current_packet.get("authenticity_assessment", {}).get("score", 0)) < 90:
-                blockers.append("Authenticity score is below 90; review source evidence before filing.")
+            if summary:
+                if not summary.get("ready_to_file"):
+                    blockers.append("Household package is not ready to file.")
+            else:
+                if critical_count > 0:
+                    blockers.append(f"{critical_count} critical consistency issue(s) must be resolved.")
+                if not bool(current_packet.get("ready_to_file")):
+                    blockers.append("Packet is currently marked not ready to file.")
 
+            # Unified decision UI
             st.markdown("#### Filing Decision")
             if blockers:
                 st.error("Step 3 decision: NOT READY TO FILE")
@@ -2394,13 +2701,27 @@ def main() -> None:
             else:
                 st.success("Step 3 decision: READY TO FILE")
 
-            st.markdown("#### Consistency Issues")
-            if not current_packet["consistency_issues"]:
-                st.success("No consistency issues detected.")
+            if summary:
+                st.markdown("#### Multi-Filer Consistency Summary")
+                for f in filers:
+                    fid = f"{f['id']} ({f['role']})"
+                    f_issues = f.get("consistency_issues", [])
+                    if not f_issues:
+                        st.write(f"✅ **{fid}**: No issues detected.")
+                    else:
+                        st.write(f"⚠️ **{fid}**: {len(f_issues)} issue(s)")
+                        for issue in f_issues:
+                            prefix = "[CRITICAL]" if issue.get("severity") == "critical" else "[WARNING]"
+                            st.markdown(f"  - {prefix} `{issue.get('code')}`: {issue.get('message')}")
             else:
-                for issue in current_packet["consistency_issues"]:
-                    prefix = "[CRITICAL]" if issue["severity"] == "critical" else "[WARNING]"
-                    st.markdown(f"- {prefix} `{issue['code']}`: {issue['message']}")
+                st.markdown("#### Consistency Issues")
+                issues = current_packet.get("consistency_issues", [])
+                if not issues:
+                    st.success("No consistency issues detected.")
+                else:
+                    for issue in issues:
+                        prefix = "[CRITICAL]" if issue.get("severity") == "critical" else "[WARNING]"
+                        st.markdown(f"- {prefix} `{issue.get('code')}`: {issue.get('message')}")
 
             st.markdown("#### Filing Checklist")
             for item in current_packet["filing_checklist"]:

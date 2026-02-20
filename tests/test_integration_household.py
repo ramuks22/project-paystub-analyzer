@@ -76,7 +76,7 @@ def test_integration_household_cli_real_fs(mock_ocr, household_setup, tmp_path):
     assert pkg_json.exists()
     data = json.loads(pkg_json.read_text())
 
-    assert data["schema_version"] == "0.3.0"
+    assert data["schema_version"] == "0.4.0"
     summary = data["household_summary"]
 
     # P1: 1000, S1: 2000 -> Total 3000 -> 300,000 cents

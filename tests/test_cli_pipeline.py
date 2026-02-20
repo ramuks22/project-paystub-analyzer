@@ -57,7 +57,7 @@ def test_annual_cli_pipeline(mock_ocr_text, tmp_path, capsys):
     assert output_json.exists()
     data = json.loads(output_json.read_text(encoding="utf-8"))
 
-    assert data["schema_version"] == "0.3.0"
+    assert data["schema_version"] == "0.4.0"
 
     # Check values extracted via regex from mock_ocr_text
     # 60,000.00 -> 6,000,000 cents

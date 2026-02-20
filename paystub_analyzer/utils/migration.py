@@ -31,3 +31,38 @@ def migrate_household_config_v0_2_to_v0_3(config: dict[str, Any]) -> dict[str, A
                 sources["w2_aggregation_mode"] = "SUM"
 
     return config
+
+
+def migrate_household_config_v0_3_to_v0_4(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Migrate a v0.3.x household configuration to v0.4.0.
+
+    Changes:
+    - Bumps version to 0.4.0.
+    - Warns about missing metadata like filing_year and state.
+    """
+    version = config.get("version", "")
+    if version.startswith("0.3."):
+        logger.warning(
+            f"Migrating household config from {version} to 0.4.0. "
+            "Please update your config file to explicitly provide filing_year and state."
+        )
+        config["version"] = "0.4.0"
+
+    return config
+
+
+def migrate_household_config(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Run all sequential migrations to bring a configuration payload to the latest stable version.
+    """
+    version = config.get("version", "")
+    if version.startswith("0.2."):
+        config = migrate_household_config_v0_2_to_v0_3(config)
+        version = config.get("version", "")
+
+    if version.startswith("0.3."):
+        config = migrate_household_config_v0_3_to_v0_4(config)
+        version = config.get("version", "")
+
+    return config

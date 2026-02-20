@@ -1038,6 +1038,11 @@ def build_household_package(
     corrections = corrections or {}
     pay_date_overrides = pay_date_overrides or {}
 
+    from paystub_analyzer.utils.contracts import validate_output
+
+    for f_id, c_data in corrections.items():
+        validate_output({f_id: c_data}, "corrections")
+
     # 1. Validation: Cardinality
     roles = [f["role"] for f in filers]
     if roles.count("PRIMARY") != 1:
@@ -1107,8 +1112,13 @@ def build_household_package(
     }
 
     public_report = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
         "household_summary": household_summary,
+        "metadata": {
+            "filing_year": int(tax_year),
+            "state": household_config.get("state", "UNKNOWN"),
+            "filing_status": household_config.get("filing_status", "UNKNOWN"),
+        },
         "filers": [r["public"] for r in results],
     }
 

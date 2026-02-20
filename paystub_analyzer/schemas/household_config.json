@@ -13,11 +13,31 @@
     "properties": {
         "version": {
             "type": "string",
-            "pattern": "^0\\.3\\.\\d+$"
+            "pattern": "^(0\\.3\\.\\d+|0\\.4\\.\\d+(-beta\\.\\d+)?)$"
         },
         "household_id": {
             "type": "string",
             "minLength": 1
+        },
+        "filing_year": {
+            "type": "integer",
+            "description": "Tax year for household analysis."
+        },
+        "state": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "description": "2-letter state code for standard deduction and state tax calculations."
+        },
+        "filing_status": {
+            "type": "string",
+            "enum": [
+                "SINGLE",
+                "MARRIED_JOINTLY",
+                "MARRIED_SEPARATELY",
+                "HEAD_OF_HOUSEHOLD",
+                "WIDOWED"
+            ],
+            "description": "Tax filing status for the household."
         },
         "filers": {
             "type": "array",
@@ -65,7 +85,9 @@
                             },
                             "w2_aggregation_mode": {
                                 "type": "string",
-                                "enum": ["SUM"],
+                                "enum": [
+                                    "SUM"
+                                ],
                                 "default": "SUM"
                             }
                         },
