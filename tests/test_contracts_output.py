@@ -169,7 +169,6 @@ def test_corrections_integration_flow(tmp_path):
     are applied to the final output and result in valid schema with audit flags.
     """
     from paystub_analyzer.annual import build_household_package
-    from paystub_analyzer.utils.contracts import validate_output
     from decimal import Decimal
 
     # Mock data source (simplified)
@@ -239,4 +238,59 @@ def test_corrections_integration_flow(tmp_path):
     assert trace["reason"] == "Manual Override Integration Test"
 
     # 3. Check Schema Compliance
+    from paystub_analyzer.utils.contracts import validate_output
+
     validate_output(output_dict, "v0_3_0_contract", mode="FILING")
+
+
+def test_household_config_v0_4_schema_valid():
+    from paystub_analyzer.utils.contracts import validate_output
+
+    # Minimal v0.4 config
+    config = {
+        "version": "0.4.0",
+        "household_id": "test_household_v4",
+        "filing_year": 2025,
+        "state": "CA",
+        "filing_status": "MARRIED_JOINTLY",
+        "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": "mock"}}],
+    }
+
+    # Should not raise ContractError
+    validate_output(config, "household_config")
+
+
+def test_household_config_v0_4_schema_invalid():
+    from paystub_analyzer.utils.contracts import validate_output, ContractError
+    import pytest
+
+    # Invalid v0.4 config (wrong state pattern)
+    config = {
+        "version": "0.4.0",
+        "household_id": "test_household_v4",
+        "filing_year": 2025,
+        "state": "California",  # Invalid pattern, expecting 2 letters
+        "filing_status": "MARRIED_JOINTLY",
+        "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": "mock"}}],
+    }
+
+    with pytest.raises(ContractError):
+        validate_output(config, "household_config")
+
+
+def test_household_config_v0_3_to_v0_4_migration():
+    from paystub_analyzer.utils.migration import migrate_household_config
+
+    v0_3_config = {
+        "version": "0.3.0",
+        "household_id": "test_household_v3",
+        "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": "mock", "w2_files": []}}],
+    }
+
+    migrated = migrate_household_config(v0_3_config)
+    assert migrated["version"] == "0.4.0"
+
+    from paystub_analyzer.utils.contracts import validate_output
+
+    # Should still validate correctly without filing_year/state because they are optional metadata
+    validate_output(migrated, "household_config")

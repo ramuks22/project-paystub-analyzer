@@ -1657,7 +1657,9 @@ def main() -> None:
 
         if household_config_path.exists():
             try:
-                household_config = json.loads(household_config_path.read_text())
+                from paystub_analyzer.utils.migration import migrate_household_config
+
+                household_config = migrate_household_config(json.loads(household_config_path.read_text()))
                 if "filers" in household_config:
                     household_mode = True
                     filers_list = [f["id"] for f in household_config["filers"]]
