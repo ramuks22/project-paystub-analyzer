@@ -2172,40 +2172,105 @@ def main() -> None:
                 with st.expander("Values Verification & Corrections"):
                     st.info("Overrides applied here will be reflected in the final filing package.")
 
-                    editable_fields = [
-                        {
-                            "Field": "gross_pay",
-                            "Internal": "gross_pay",
-                            "YTD": float(extracted["gross_pay"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "federal_income_tax",
-                            "Internal": "federal_income_tax",
-                            "YTD": float(extracted["federal_income_tax"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "social_security_tax",
-                            "Internal": "social_security_tax",
-                            "YTD": float(extracted["social_security_tax"].get("ytd") or 0.0),
-                        },
-                        {
-                            "Field": "medicare_tax",
-                            "Internal": "medicare_tax",
-                            "YTD": float(extracted["medicare_tax"].get("ytd") or 0.0),
-                        },
+                    existing_corrections = st.session_state.get("corrections", {}).get(active_filer_id, {})
+                    editor_rows = []
+                    for k, v in existing_corrections.items():
+                        editor_rows.append(
+                            {
+                                "Field": k,
+                                "Value": float(v.get("value", 0.0)),
+                                "Reason": v.get("audit_reason", "Manual UI Override"),
+                            }
+                        )
+
+                    import pandas as pd
+
+                    df_corrections = pd.DataFrame(editor_rows, columns=["Field", "Value", "Reason"])
+                    if df_corrections.empty:
+                        # Start with one empty row to make the UI obvious
+                        df_corrections = pd.DataFrame(
+                            [{"Field": None, "Value": None, "Reason": ""}], columns=["Field", "Value", "Reason"]
+                        )
+
+                    allowed_fields = [
+                        "gross_pay",
+                        "federal_income_tax",
+                        "social_security_wages",
+                        "social_security_tax",
+                        "medicare_wages",
+                        "medicare_tax",
+                        "k401_contrib",
                     ]
+                    states = [
+                        "AL",
+                        "AK",
+                        "AZ",
+                        "AR",
+                        "CA",
+                        "CO",
+                        "CT",
+                        "DE",
+                        "FL",
+                        "GA",
+                        "HI",
+                        "ID",
+                        "IL",
+                        "IN",
+                        "IA",
+                        "KS",
+                        "KY",
+                        "LA",
+                        "ME",
+                        "MD",
+                        "MA",
+                        "MI",
+                        "MN",
+                        "MS",
+                        "MO",
+                        "MT",
+                        "NE",
+                        "NV",
+                        "NH",
+                        "NJ",
+                        "NM",
+                        "NY",
+                        "NC",
+                        "ND",
+                        "OH",
+                        "OK",
+                        "OR",
+                        "PA",
+                        "RI",
+                        "SC",
+                        "SD",
+                        "TN",
+                        "TX",
+                        "UT",
+                        "VT",
+                        "VA",
+                        "WA",
+                        "WV",
+                        "WI",
+                        "WY",
+                    ]
+                    for s in states:
+                        allowed_fields.append(f"state_income_tax_{s}")
 
-                    # Hide "Internal" key from UI
-                    display_data = [{"Field": f["Field"], "YTD": f["YTD"]} for f in editable_fields]
-
-                    edited_data = st.data_editor(
-                        display_data,
+                    edited_df = st.data_editor(
+                        df_corrections,
                         column_config={
-                            "Field": st.column_config.TextColumn("Tax Liability", disabled=True),
-                            "YTD": st.column_config.NumberColumn(
-                                "Corrected YTD", min_value=0.0, step=0.01, format="$%.2f"
+                            "Field": st.column_config.SelectboxColumn(
+                                "Override Field",
+                                help="Select the exact schema key from the W-2/Filer contract",
+                                options=allowed_fields,
+                                required=True,
                             ),
+                            "Value": st.column_config.NumberColumn(
+                                "Corrected YTD", min_value=0.0, step=0.01, format="$%.2f", required=True
+                            ),
+                            "Reason": st.column_config.TextColumn("Audit Reason", required=True),
                         },
+                        num_rows="dynamic",
                         hide_index=True,
                         use_container_width=True,
                         key=f"corrections_editor_{active_filer_id}_{st.session_state.get('_run_id', 0)}",
@@ -2214,27 +2279,28 @@ def main() -> None:
                     if st.button("Apply Corrections", key=f"apply_corrections_{active_filer_id}", type="primary"):
                         if "corrections" not in st.session_state:
                             st.session_state["corrections"] = {}
-                        if active_filer_id not in st.session_state["corrections"]:
-                            st.session_state["corrections"][active_filer_id] = {}
 
-                        changed = False
-                        for orig, edited in zip(editable_fields, edited_data):
-                            new_val_raw_str = str(edited.get("YTD"))
+                        new_corrections = {}
+                        for idx, row in edited_df.iterrows():
+                            field = row.get("Field")
+                            val = row.get("Value")
+                            reason = row.get("Reason")
 
-                            # Skip bad parses
-                            try:
-                                new_val = float(new_val_raw_str)
-                            except ValueError:
+                            if not field or pd.isna(val) or pd.isna(field):
                                 continue
 
-                            if orig["YTD"] != new_val:
-                                st.session_state["corrections"][active_filer_id][orig["Internal"]] = {
-                                    "value": float(new_val),
-                                    "audit_reason": "Manual UI Override",
-                                }
-                                changed = True
+                            try:
+                                val_float = float(val)
+                            except (ValueError, TypeError):
+                                continue
 
-                        if changed:
+                            if pd.isna(reason) or str(reason).strip() == "":
+                                reason = "Manual UI Override"
+
+                            new_corrections[str(field)] = {"value": val_float, "audit_reason": str(reason).strip()}
+
+                        if new_corrections != existing_corrections:
+                            st.session_state["corrections"][active_filer_id] = new_corrections
                             st.rerun()
 
                 y1, y2, y3, y4 = st.columns(4)
