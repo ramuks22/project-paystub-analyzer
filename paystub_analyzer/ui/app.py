@@ -1296,9 +1296,9 @@ def render_pay_date_override_editor(
     invalid_rows: list[str] = []
     for _, row in editor_df.iterrows():
         file_name = str(row.get("File", "")).strip()
-        detected = str(row.get("Detected Pay Date", "")).strip()
+        detected_str = str(row.get("Detected Pay Date", "")).strip()
         assigned = str(row.get("Assigned Pay Date", "")).strip()
-        if not file_name or not assigned or assigned == detected:
+        if not file_name or not assigned or assigned == detected_str:
             continue
         try:
             normalized = date.fromisoformat(assigned).isoformat()
