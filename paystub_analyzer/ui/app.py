@@ -31,6 +31,26 @@ from paystub_analyzer import annual as annual_module
 from paystub_analyzer.w2 import build_w2_template, compare_snapshot_to_w2
 from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
+
+def _hash_file(path: Path) -> str:
+    import hashlib
+
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_paystub_snapshot(path_str: str, file_hash: str, render_scale: float) -> PaystubSnapshot:
+    return extract_paystub_snapshot(Path(path_str), render_scale=render_scale)
+
+
+@st.cache_data(show_spinner=False)
+def get_cached_w2_payload(
+    pdf_path_str: str, file_hash: str, render_scale: float, psm: int, fallback_year: int
+) -> dict[str, Any]:
+    return w2_pdf_to_json_payload(Path(pdf_path_str), render_scale=render_scale, psm=psm, fallback_year=fallback_year)
+
+
 build_tax_filing_package = annual_module.build_tax_filing_package
 collect_annual_snapshots = annual_module.collect_annual_snapshots
 package_to_markdown = annual_module.package_to_markdown
@@ -2060,7 +2080,8 @@ def main() -> None:
                         raw_count = 0 if household_mode else preview_paystub_count
 
                     else:
-                        snapshot = extract_paystub_snapshot(Path(selected), render_scale=render_scale)
+                        file_hash = _hash_file(Path(selected))
+                        snapshot = get_cached_paystub_snapshot(str(selected), file_hash, render_scale)
                         st.session_state["snapshot"] = snapshot
                         st.session_state.pop("annual_summary_preview", None)
                         st.session_state["analysis_scope"] = "single"
@@ -2445,8 +2466,10 @@ def main() -> None:
                 temp_pdf.write(uploaded_bytes)
                 temp_path = Path(temp_pdf.name)
             try:
-                w2_data = w2_pdf_to_json_payload(
-                    pdf_path=temp_path,
+                file_hash = _hash_file(temp_path)
+                w2_data = get_cached_w2_payload(
+                    pdf_path_str=str(temp_path),
+                    file_hash=file_hash,
                     render_scale=max(render_scale, 3.0),
                     psm=6,
                     fallback_year=int(year),
