@@ -1,0 +1,7 @@
+{
+    "manifest_version": "1.0",
+    "project": "paystub-analyzer",
+    "baseline_version": "v0.4.0",
+    "dataset_path": "tests/fixtures/gold/",
+    "entries": []
+}
