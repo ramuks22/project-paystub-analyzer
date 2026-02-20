@@ -222,7 +222,8 @@ pytest -m e2e
 - `.gitignore` excludes sensitive artifacts by default (paystub PDFs, W-2 PDFs/JSON payloads, and generated reports).
 
 ## 🔒 Dataset Security & Governance
-This project follows strict PII-protection policies. Accuracy measurement and benchmarking utilize a "Gold Dataset" stored in `tests/fixtures/gold/`.
-- **Synthetic Manifest**: Every test asset must have a corresponding manifest entry documenting its synthetic provenance and redaction status.
+This project follows strict PII-protection policies. Accuracy measurement and benchmarking utilizes a "Gold Dataset" stored in `tests/fixtures/gold/`.
+- **Manifest Requirement**: `tests/fixtures/gold/manifest.json` MUST map every asset SHA-256 to ground-truth labels.
+- **Provenance Policy**: Every benchmark asset must document its synthetic origin or redaction methodology to ensure no raw PII leak.
 - **No Raw PII**: Unredacted or real-user paystubs must **never** be committed to the repository.
-- **Provenance Logging**: Any modification to the benchmark set must be traced back to a synthetic generator or a manual redaction event.
+- **Zero-Bypass Hooks**: Pre-commit hooks enforcing PII-blocking are non-negotiable for all PRs.

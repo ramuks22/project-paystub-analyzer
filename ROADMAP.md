@@ -45,7 +45,12 @@
     *   CI SLA: batch extractions < 10s (GitHub Actions runner).
 *   **KPI Formulas**:
     *   `mismatch_rate = false_mismatches / total_comparison_rows`
-    *   `anomaly_recall = detected_anomalies / total_labeled_anomalies` (Applied as Macro & Weighted).
+    *   `anomaly_recall_macro` (Macro-average of all class recalls)
+    *   `anomaly_recall_weighted` (Recall weighted by filing impact severity)
+*   **Engineering Policies (DoD)**:
+    *   **Reproducibility**: Identical manifest + settings MUST produce bit-identical `metrics.json`.
+    *   **Anti-Gaming**: Accuracy gains must not be offset by >5% increase in "Review Required" rate.
+    *   **CI Strategy**: PRs run "Smoke" subsets; Nightly runs "Full" suite with trend regression gates.
 
 
 ## 5. v0.6.0 Contract and Compatibility (2-3 weeks)
