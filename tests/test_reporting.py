@@ -4,7 +4,8 @@ from paystub_analyzer.annual import package_to_markdown
 def test_reporting_state_tax_verification():
     # Mock package structure
     package = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
+        "metadata": {"filing_year": 2025, "state": "CA", "filing_status": "SINGLE"},
         "household_summary": {"total_gross_pay_cents": 100000, "total_fed_tax_cents": 20000, "ready_to_file": True},
         "filers": [
             {
@@ -45,7 +46,8 @@ def test_reporting_state_tax_verification():
 def test_reporting_state_tax_missing_w2():
     # Case where W-2 data is missing for a state present on paystub
     package = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
+        "metadata": {"filing_year": 2025, "state": "CA", "filing_status": "SINGLE"},
         "household_summary": {"total_gross_pay_cents": 0, "total_fed_tax_cents": 0, "ready_to_file": False},
         "filers": [
             {
@@ -67,7 +69,8 @@ def test_reporting_state_tax_missing_w2():
 def test_reporting_state_tax_missing_paystub():
     # Case where paystub is missing a state present on W-2
     package = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
+        "metadata": {"filing_year": 2025, "state": "CA", "filing_status": "SINGLE"},
         "household_summary": {"total_gross_pay_cents": 0, "total_fed_tax_cents": 0, "ready_to_file": False},
         "filers": [
             {

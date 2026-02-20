@@ -5,6 +5,7 @@
     "required": [
         "schema_version",
         "household_summary",
+        "metadata",
         "filers"
     ],
     "properties": {

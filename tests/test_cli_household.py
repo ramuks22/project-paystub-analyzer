@@ -35,7 +35,8 @@ def test_cli_household_config_flow(
     # Mock return from build_household_package
     mock_build.return_value = {
         "report": {
-            "schema_version": "0.3.0",
+            "schema_version": "0.4.0",
+            "metadata": {"filing_year": 2025, "state": "UNKNOWN", "filing_status": "UNKNOWN"},
             "household_summary": {"total_gross_pay_cents": 100, "total_fed_tax_cents": 10, "ready_to_file": True},
             "filers": [
                 {"id": "primary", "role": "PRIMARY", "status": "MATCH"},

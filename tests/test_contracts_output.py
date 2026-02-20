@@ -4,7 +4,7 @@ import jsonschema
 from pathlib import Path
 
 # Load schema once
-SCHEMA_PATH = Path(__file__).parent.parent / "paystub_analyzer" / "schemas" / "v0_3_0_contract.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "paystub_analyzer" / "schemas" / "v0_4_0_contract.json"
 SCHEMA = json.loads(SCHEMA_PATH.read_text())
 
 
@@ -16,6 +16,7 @@ def test_valid_v0_3_0_output_conforms_to_schema():
     sample_output = {
         "schema_version": "0.4.0",
         "household_summary": {"total_gross_pay_cents": 500000, "total_fed_tax_cents": 50000, "ready_to_file": True},
+        "metadata": {"filing_year": 2025, "state": "VA", "filing_status": "SINGLE"},
         "filers": [
             {
                 "id": "primary",
@@ -47,6 +48,7 @@ def test_invalid_v0_3_0_output_fails_schema_missing_fields():
     malformed_output = {
         "schema_version": "0.4.0",
         "household_summary": {"total_gross_pay_cents": 500000, "total_fed_tax_cents": 50000, "ready_to_file": True},
+        "metadata": {"filing_year": 2025, "state": "VA", "filing_status": "SINGLE"},
         "filers": [
             {
                 "id": "primary",
@@ -161,7 +163,7 @@ def test_cli_output_conforms_to_contract(tmp_path):
     # 2. Check Schema Compliance using the official validator
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(output_dict, "v0_3_0_contract", mode="FILING")
+    validate_output(output_dict, "v0_4_0_contract", mode="FILING")
 
 
 @pytest.mark.integration
@@ -242,7 +244,7 @@ def test_corrections_integration_flow(tmp_path):
     # 3. Check Schema Compliance
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(output_dict, "v0_3_0_contract", mode="FILING")
+    validate_output(output_dict, "v0_4_0_contract", mode="FILING")
 
 
 def test_household_config_v0_4_schema_valid():

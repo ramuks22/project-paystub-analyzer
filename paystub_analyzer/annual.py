@@ -1125,7 +1125,7 @@ def build_household_package(
     # Validate Contract
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(public_report, "v0_3_0_contract", mode="FILING")
+    validate_output(public_report, "v0_4_0_contract", mode="FILING")
 
     # Composite return (list of internal results + aggregate report)
     return {
@@ -1173,11 +1173,16 @@ def build_tax_filing_package(
     filer_report = analysis["public"]
 
     public_report = {
-        "schema_version": "0.3.0",
+        "schema_version": "0.4.0",
         "household_summary": {
             "total_gross_pay_cents": filer_report["gross_pay_cents"],
             "total_fed_tax_cents": filer_report["fed_tax_cents"],
             "ready_to_file": filer_report["status"] == "MATCH",
+        },
+        "metadata": {
+            "filing_year": int(tax_year),
+            "state": "UNKNOWN",
+            "filing_status": "UNKNOWN",
         },
         "filers": [filer_report],
     }
@@ -1185,7 +1190,7 @@ def build_tax_filing_package(
     # Validate Contract
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(public_report, "v0_3_0_contract", mode="FILING")
+    validate_output(public_report, "v0_4_0_contract", mode="FILING")
 
     return {
         "report": public_report,
