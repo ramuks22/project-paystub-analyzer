@@ -140,7 +140,10 @@ Outputs:
 
 Ledger CSV includes `ytd_verification` to show any parsed-vs-calculated mismatches or auto-corrections detected for a row.
 
-### Household Filing (v0.3.0)
+### Household Filing (v0.3.0 & v0.4.0)
+
+> [!NOTE]
+> **v0.4.0 Scope Note**: Any newly collected household properties such as `filing_year`, `state`, and `filing_status` are currently treated as **metadata only**. They are included in the output packets for completeness but do not currently alter the internal tax calculation or comparison math.
 
 Analyze multiple filers (Primary + Optional Spouse) together. Supports **multiple W-2s** per filer with strict deduplication.
 
