@@ -19,6 +19,7 @@ w2_forms/*.pdf
 w2_forms/*.json
 !w2_forms/*template*.json
 !w2_forms/README.md
+!tests/fixtures/gold/**/*.pdf
 
 # Generated analysis outputs that may contain personal tax data
 reports/

@@ -2,12 +2,144 @@
     "manifest_version": "1.0",
     "project": "paystub-analyzer",
     "baseline_version": "v0.4.0",
+    "dataset_path": "tests/fixtures/gold/",
     "entries": [
         {
             "id": "smoke_test_2025",
+            "provider": "adp",
             "description": "Standard ADP single-filer smoke test with 401k and State Tax.",
             "inputs": {
                 "paystubs_dir": "smoke_test_2025/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "adp_standard",
+            "provider": "adp",
+            "description": "Classic ADP layout, clean extraction target.",
+            "inputs": {
+                "paystubs_dir": "adp_standard/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "gusto_clean",
+            "provider": "gusto",
+            "description": "Modern Gusto layout, minimalist and large fonts.",
+            "inputs": {
+                "paystubs_dir": "gusto_clean/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "trinet_complex",
+            "provider": "trinet",
+            "description": "Complex TriNet grid layout with subtle noise injection.",
+            "inputs": {
+                "paystubs_dir": "trinet_complex/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "adp_revised",
+            "provider": "adp",
+            "description": "Revised ADP stub with one-time period jump but consistent YTD.",
+            "inputs": {
+                "paystubs_dir": "adp_revised/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "ocr_challenge",
+            "provider": "adp",
+            "description": "Heavy visual noise/artifacts to test OCR extraction resilience.",
+            "inputs": {
+                "paystubs_dir": "ocr_challenge/paystubs",
                 "w2_files": []
             },
             "settings": {
