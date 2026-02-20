@@ -1,15 +1,58 @@
 {
-  "timestamp": "2026-02-20T20:38:08Z",
-  "duration_sec": 0.84,
-  "total_entries": 1,
-  "mismatch_rate": 0.0,
+  "timestamp": "2026-02-20T20:53:03Z",
+  "duration_sec": 4.1,
+  "total_entries": 8,
+  "mismatch_rate": 43.75,
   "recall_macro": 100.0,
   "recall_weighted": 100.0,
   "results": [
     {
       "id": "smoke_test_2025",
       "status": "PASS",
+      "mismatches": 0,
       "report_hash": "2845547194c31375bd88f860ccf35cfbb682571bb118be72ef1c274d7ff41615"
+    },
+    {
+      "id": "adp_standard",
+      "status": "PASS",
+      "mismatches": 0,
+      "report_hash": "61cb0730e3084b7b789ea555422c94ea2a23f1174fe0e9d428c624cc03f6bb49"
+    },
+    {
+      "id": "gusto_clean",
+      "status": "FAIL",
+      "mismatches": 2,
+      "report_hash": "d6774f2621f0a6180b96cfd2d452bfe55d4def70ac8c81e297c3c1cb442110be"
+    },
+    {
+      "id": "trinet_complex",
+      "status": "FAIL",
+      "mismatches": 2,
+      "report_hash": "a20dec1bf82e0e31af77f979a590db7e51fd5bd984b71d1766a9f95766242346"
+    },
+    {
+      "id": "paychex_classic",
+      "status": "FAIL",
+      "mismatches": 1,
+      "report_hash": "70882d0b09e74feae6f89647e9fb87663916b328d4476cb8f8e83f8709804ea2"
+    },
+    {
+      "id": "workday_modern",
+      "status": "FAIL",
+      "mismatches": 2,
+      "report_hash": "a20dec1bf82e0e31af77f979a590db7e51fd5bd984b71d1766a9f95766242346"
+    },
+    {
+      "id": "adp_revised",
+      "status": "PASS",
+      "mismatches": 0,
+      "report_hash": "61cb0730e3084b7b789ea555422c94ea2a23f1174fe0e9d428c624cc03f6bb49"
+    },
+    {
+      "id": "ocr_challenge",
+      "status": "PASS",
+      "mismatches": 0,
+      "report_hash": "61cb0730e3084b7b789ea555422c94ea2a23f1174fe0e9d428c624cc03f6bb49"
     }
   ]
 }

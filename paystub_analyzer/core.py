@@ -15,7 +15,7 @@ from typing import Callable
 import pypdfium2 as pdfium
 
 MONEY_RE = re.compile(r"[+-]?\$?\d[\d,]*\.\d{2}")
-FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_\d+)?\.pdf$", re.IGNORECASE)
+FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
 TEXT_PAY_DATE_RE = re.compile(r"Pay Date:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 STATE_TAX_LINE_RE = re.compile(r"\b([A-Z]{2}) State Income Tax\b", re.IGNORECASE)
 OcrTextProvider = Callable[[Path, float, int], str]
