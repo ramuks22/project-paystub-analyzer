@@ -530,7 +530,7 @@ def apply_manual_pay_date_overrides(
                 severity="warning",
                 code="pay_date_override_applied",
                 message=(
-                    f"Applied manual pay date override for `{snapshot.file}`: " f"{snapshot.pay_date} -> {normalized}"
+                    f"Applied manual pay date override for `{snapshot.file}`: {snapshot.pay_date} -> {normalized}"
                 ),
             )
         )
@@ -1247,9 +1247,9 @@ def package_to_markdown(package: dict[str, Any]) -> str:
                 # User asked for "State Tax Verification".
 
                 # Format money
-                ps_str = f"${ps_cents/100:,.2f}" if st in paystub_states else "—"
-                w2_str = f"${w2_cents/100:,.2f}" if st in w2_state_map else "—"
-                diff_str = f"${diff/100:,.2f}"
+                ps_str = f"${ps_cents / 100:,.2f}" if st in paystub_states else "—"
+                w2_str = f"${w2_cents / 100:,.2f}" if st in w2_state_map else "—"
+                diff_str = f"${diff / 100:,.2f}"
 
                 lines.append(f"| {st} | {ps_str} | {w2_str} | {diff_str} | {status} |")
 

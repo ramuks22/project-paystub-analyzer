@@ -3,6 +3,7 @@
 Generates synthetic PDF fixtures (Paystubs and W-2s) for E2E testing.
 Requires: pip install reportlab
 """
+
 import sys
 from pathlib import Path
 
