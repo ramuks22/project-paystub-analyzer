@@ -22,6 +22,7 @@ w2_forms/*.json
 
 # Generated analysis outputs that may contain personal tax data
 reports/
+!reports/baselines/
 private_notes/
 
 # Secrets / credentials

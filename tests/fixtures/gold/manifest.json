@@ -2,6 +2,31 @@
     "manifest_version": "1.0",
     "project": "paystub-analyzer",
     "baseline_version": "v0.4.0",
-    "dataset_path": "tests/fixtures/gold/",
-    "entries": []
+    "entries": [
+        {
+            "id": "smoke_test_2025",
+            "description": "Standard ADP single-filer smoke test with 401k and State Tax.",
+            "inputs": {
+                "paystubs_dir": "smoke_test_2025/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        }
+    ]
 }

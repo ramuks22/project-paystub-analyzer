@@ -133,11 +133,45 @@ jobs:
           fi
 
           # Check content validity (simple grep for now, or python script)
-          # Ensuring schema_version 0.3.0 is present
-          if ! grep -q '"schema_version": "0.3.0"' smoke_data/output/package.json; then
+          # Ensuring schema_version 0.4.0 is present
+          if ! grep -q '"schema_version": "0.4.0"' smoke_data/output/package.json; then
              echo "Error: Schema version mismatch or file empty."
              cat smoke_data/output/package.json
              exit 1
           fi
 
           echo "Smoke test passed. Output generated and validated."
+
+  accuracy-benchmark:
+    name: Accuracy & Reproducibility Benchmark
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y tesseract-ocr
+          pip install reportlab
+          pip install -e .
+
+      - name: Generate Smoke Fixtures
+        run: python scripts/generate_smoke_fixture.py tests/fixtures/gold/smoke_test_2025/paystubs
+
+      - name: Run Benchmark (Smoke Subset)
+        run: |
+          python scripts/benchmark_accuracy.py \
+            --manifest tests/fixtures/gold/manifest.json \
+            --out reports/ci_smoke_metrics.json \
+            --verify-reproducibility
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: reports/ci_smoke_metrics.json
