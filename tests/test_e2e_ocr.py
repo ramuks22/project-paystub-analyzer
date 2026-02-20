@@ -88,7 +88,7 @@ def test_annual_cli_real_ocr(tmp_path):
     assert output_json.exists()
     data = json.loads(output_json.read_text(encoding="utf-8"))
 
-    assert data["schema_version"] == "0.2.0"
+    assert data["schema_version"] == "0.3.0"
     # Tax year and paystub count are not in the public report in v0.2.0 schema currently,
     # but we can infer things from the summary.
 

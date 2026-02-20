@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import inspect
 import io
 import json
 import tempfile
 import time
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -22,19 +23,20 @@ from paystub_analyzer.core import (
     extract_paystub_snapshot,
     format_money,
     list_paystub_files,
+    parse_pay_date_from_filename,
     select_latest_paystub,
-    sum_state_ytd,
     PaystubSnapshot,
 )
-from paystub_analyzer.annual import (
-    build_tax_filing_package,
-    collect_annual_snapshots,
-    package_to_markdown,
-)
+from paystub_analyzer import annual as annual_module
 from paystub_analyzer.w2 import build_w2_template, compare_snapshot_to_w2
 from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
-APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v2"
+build_tax_filing_package = annual_module.build_tax_filing_package
+collect_annual_snapshots = annual_module.collect_annual_snapshots
+package_to_markdown = annual_module.package_to_markdown
+build_household_package = getattr(annual_module, "build_household_package", None)
+
+APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v3"
 ButtonKind = Literal["primary", "secondary", "tertiary"]
 
 
@@ -224,7 +226,7 @@ h1, h2, h3, h4, h5, h6 {
 /* Section heading treatment for Step blocks */
 .step-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center; /* Change from flex-start to center */
   gap: 0.7rem;
   padding: 0.55rem 0.8rem;
   margin: 0.2rem 0 0.45rem;
@@ -236,16 +238,18 @@ h1, h2, h3, h4, h5, h6 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 64px;
-  height: 1.55rem;
-  border-radius: 9999px;
+  min-width: 80px;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border-radius: 8px;
   border: 1px solid #b8d0db;
-  background: #e8f2f7;
+  background: #ffffff;
   color: #0f5d75;
-  font-size: 0.72rem;
+  font-size: 0.9rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.05em;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 .step-copy h3 {
   margin: 0 !important;
@@ -887,6 +891,7 @@ def clear_workflow_state() -> None:
         "w2_validation",
         "extract_run_meta",
         "extract_quality",
+        "pay_date_overrides",
         "_w2_autofilled_fields",
         "manual_w2_prefill_source",
         "manual_w2_states",
@@ -1138,15 +1143,25 @@ def build_comparison_display_df(rows: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(display_rows)
 
 
-def build_ledger_display_df(ledger: list[dict[str, Any]]) -> pd.DataFrame:
+def build_ledger_display_df(
+    ledger: list[dict[str, Any]],
+    include_calc_columns: bool = False,
+) -> pd.DataFrame:
     if not ledger:
         return pd.DataFrame()
     rows: list[dict[str, str]] = []
-    for row in ledger:
-        rows.append(
+    for row_num, row in enumerate(ledger, start=1):
+        record = {
+            "S.No": str(row_num),
+            "Pay Date": format_plain_display(row.get("pay_date")),
+            "File": display_file_name(row.get("file")),
+        }
+        if include_calc_columns:
+            record["Calculation Status"] = format_plain_display(row.get("calculation_status"))
+            record["Canonical File"] = display_file_name(row.get("canonical_file"))
+
+        record.update(
             {
-                "Pay Date": format_plain_display(row.get("pay_date")),
-                "File": display_file_name(row.get("file")),
                 "Gross YTD": format_currency_display(row.get("gross_pay_ytd")),
                 "Federal YTD": format_currency_display(row.get("federal_tax_ytd")),
                 "SS YTD": format_currency_display(row.get("social_security_tax_ytd")),
@@ -1156,6 +1171,7 @@ def build_ledger_display_df(ledger: list[dict[str, Any]]) -> pd.DataFrame:
                 "YTD Verification": format_plain_display(row.get("ytd_verification")),
             }
         )
+        rows.append(record)
     return pd.DataFrame(rows)
 
 
@@ -1238,6 +1254,69 @@ def snapshot_to_dict(snapshot: PaystubSnapshot) -> dict[str, Any]:
     }
 
 
+def get_filer_pay_date_overrides(filer_id: str) -> dict[str, str]:
+    all_overrides = cast(dict[str, dict[str, str]], st.session_state.setdefault("pay_date_overrides", {}))
+    return all_overrides.setdefault(filer_id, {})
+
+
+def render_pay_date_override_editor(
+    filer_id: str,
+    files: list[Path],
+    tax_year: int,
+) -> dict[str, str]:
+    existing = get_filer_pay_date_overrides(filer_id)
+    rows: list[dict[str, str]] = []
+    for file_path in files:
+        detected = parse_pay_date_from_filename(file_path)
+        detected_iso = detected.isoformat() if detected else ""
+        assigned_iso = existing.get(file_path.name, detected_iso)
+        rows.append(
+            {
+                "File": file_path.name,
+                "Detected Pay Date": detected_iso,
+                "Assigned Pay Date": assigned_iso,
+            }
+        )
+
+    editor_df = st.data_editor(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        key=f"pay_date_override_editor_{filer_id}_{tax_year}",
+        column_config={
+            "File": st.column_config.Column(disabled=True),
+            "Detected Pay Date": st.column_config.Column(disabled=True),
+            "Assigned Pay Date": st.column_config.TextColumn(
+                help="Use YYYY-MM-DD. Leave as detected date to keep automatic behavior."
+            ),
+        },
+    )
+
+    valid_overrides: dict[str, str] = {}
+    invalid_rows: list[str] = []
+    for _, row in editor_df.iterrows():
+        file_name = str(row.get("File", "")).strip()
+        detected = str(row.get("Detected Pay Date", "")).strip()
+        assigned = str(row.get("Assigned Pay Date", "")).strip()
+        if not file_name or not assigned or assigned == detected:
+            continue
+        try:
+            normalized = date.fromisoformat(assigned).isoformat()
+        except ValueError:
+            invalid_rows.append(file_name)
+            continue
+        valid_overrides[file_name] = normalized
+
+    all_overrides = cast(dict[str, dict[str, str]], st.session_state.setdefault("pay_date_overrides", {}))
+    all_overrides[filer_id] = valid_overrides
+    if invalid_rows:
+        st.warning(
+            "Ignored invalid pay-date override format for: " + ", ".join(sorted(invalid_rows)) + ". Use YYYY-MM-DD."
+        )
+
+    return valid_overrides
+
+
 def build_report_markdown(payload: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append("# Payslip vs W-2 Validation")
@@ -1283,6 +1362,13 @@ def show_notice(message: str, level: str = "success") -> None:
         f"<div class='notice notice-{level}'>{message}</div>",
         unsafe_allow_html=True,
     )
+
+
+def supports_kwarg(func: Any, kwarg_name: str) -> bool:
+    try:
+        return kwarg_name in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def state_values_from_w2_data(w2_data: dict[str, Any] | None) -> dict[str, dict[str, float]]:
@@ -1557,10 +1643,30 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Run Settings")
-        paystubs_dir = Path(st.text_input("Paystubs directory", value="pay_statements"))
+        paystubs_dir_str = st.text_input("Paystubs directory", value="pay_statements")
+        paystubs_dir = Path(paystubs_dir_str)
         year = st.number_input("Tax year", min_value=2000, max_value=2100, value=2025, step=1)
         render_scale = st.slider("OCR render scale", min_value=2.0, max_value=4.0, value=2.8, step=0.1)
         tolerance = Decimal(str(st.number_input("Comparison tolerance", min_value=0.0, value=0.01, step=0.01)))
+
+        # v0.3.0 Household Mode
+        household_config_path = paystubs_dir / "household_config.json"
+        household_mode = False
+        filers_list = ["primary"]
+        household_config = None
+
+        if household_config_path.exists():
+            try:
+                household_config = json.loads(household_config_path.read_text())
+                if "filers" in household_config:
+                    household_mode = True
+                    filers_list = [f["id"] for f in household_config["filers"]]
+                    st.success(f"Household Config found ({len(filers_list)} filers)")
+            except Exception as e:
+                st.warning(f"Invalid household_config.json: {e}")
+
+        selected_filer = st.selectbox("Select Filer View", filers_list)
+        st.session_state["active_filer_id"] = selected_filer
 
     files = list_paystub_files(paystubs_dir, int(year))
     if not files:
@@ -1642,6 +1748,8 @@ def main() -> None:
         "Run OCR extraction to capture YTD taxes and evidence lines from your selected payslip scope.",
     )
     with st.container():
+        active_filer_id = str(st.session_state.get("active_filer_id", "primary"))
+        manual_pay_date_overrides: dict[str, str] = {}
         analysis_scope = st.radio(
             "Analysis Scope",
             options=["Single payslip", "All payslips in year"],
@@ -1666,6 +1774,13 @@ def main() -> None:
             )
         else:
             st.caption("Year mode will process every payslip in this folder/year and show a full-year summary.")
+            with st.expander("Optional: Manual Pay-Date Overrides", expanded=False):
+                st.caption("Use this when a revised payslip should count toward a different pay cycle.")
+                manual_pay_date_overrides = render_pay_date_override_editor(
+                    filer_id=active_filer_id,
+                    files=files,
+                    tax_year=int(year),
+                )
 
     extract_button_type: ButtonKind = "primary" if active_step == 1 else "secondary"
     with st.container():
@@ -1676,27 +1791,136 @@ def main() -> None:
             try:
                 with st.spinner("Running OCR extraction and consistency checks..."):
                     if analysis_scope == "All payslips in year":
-                        annual_snapshots = collect_annual_snapshots(
-                            paystubs_dir=paystubs_dir,
-                            year=int(year),
-                            render_scale=render_scale,
-                            psm=6,
-                        )
-                        if not annual_snapshots:
-                            st.error("No paystubs found for full-year analysis.")
-                            return
-                        snapshot = annual_snapshots[-1]
-                        annual_summary = build_tax_filing_package(
-                            tax_year=int(year),
-                            snapshots=annual_snapshots,
-                            tolerance=tolerance,
-                            w2_data=None,
-                        )
-                        st.session_state["snapshot"] = snapshot
-                        st.session_state["annual_summary_preview"] = annual_summary
+                        # v0.3.0 Household Analysis
+                        if household_mode and household_config:
+                            # Define loaders for household orchestrator
+                            def ui_snapshot_loader(src_config: dict[str, Any]) -> list[PaystubSnapshot]:
+                                sub_dir = Path(src_config.get("paystubs_dir", "."))
+                                full_path = sub_dir if sub_dir.is_absolute() else paystubs_dir / sub_dir
+                                return collect_annual_snapshots(
+                                    paystubs_dir=full_path,
+                                    year=int(year),
+                                    render_scale=render_scale,
+                                    psm=6,
+                                )
+
+                            def ui_w2_loader(src_config: dict[str, Any]) -> dict[str, Any] | None:
+                                # v0.3.0 TODO: Implement W-2 loader for UI if needed.
+                                # For now, UI relies on separate Step 2 for W-2s, or we can scan w2_files?
+                                # Let's return None to keep this "Extraction Only" step safe.
+                                return None
+
+                            if build_household_package is None:
+                                st.error(
+                                    "Household mode requires `build_household_package` in "
+                                    "`paystub_analyzer.annual`. Please update/reinstall the package."
+                                )
+                                return
+                            household_kwargs: dict[str, Any] = {
+                                "household_config": household_config,
+                                "tax_year": int(year),
+                                "snapshot_loader": ui_snapshot_loader,
+                                "w2_loader": ui_w2_loader,
+                                "tolerance": tolerance,
+                            }
+                            if supports_kwarg(build_household_package, "corrections"):
+                                household_kwargs["corrections"] = st.session_state.get("corrections", {})
+
+                            all_pay_date_overrides = cast(
+                                dict[str, dict[str, str]],
+                                st.session_state.get("pay_date_overrides", {}),
+                            )
+                            if supports_kwarg(build_household_package, "pay_date_overrides"):
+                                household_kwargs["pay_date_overrides"] = all_pay_date_overrides
+                            elif any(all_pay_date_overrides.values()):
+                                st.warning(
+                                    "Manual pay-date overrides require a newer backend version. "
+                                    "Overrides were ignored for this run."
+                                )
+
+                            annual_result = build_household_package(**household_kwargs)
+                            # annual_result has {"report": ..., "filers_analysis": [...]}
+
+                        else:
+                            # Legacy Single Filer (wrapped to match household structure)
+                            annual_snapshots = collect_annual_snapshots(
+                                paystubs_dir=paystubs_dir,
+                                year=int(year),
+                                render_scale=render_scale,
+                                psm=6,
+                            )
+                            if not annual_snapshots:
+                                st.error("No paystubs found for full-year analysis.")
+                                return
+                            # Use legacy builder but ensure we get analysis result
+                            # build_tax_filing_package computes analysis but returns specific flat dict
+                            # We can just call analyze_filer directly or reconstruct?
+                            # Let's call build_tax_filing_package and inspect.
+                            package_kwargs: dict[str, Any] = {
+                                "tax_year": int(year),
+                                "snapshots": annual_snapshots,
+                                "tolerance": tolerance,
+                                "w2_data": None,  # /st.session_state.get("w2_data")?
+                            }
+                            if supports_kwarg(build_tax_filing_package, "pay_date_overrides"):
+                                package_kwargs["pay_date_overrides"] = manual_pay_date_overrides
+                            elif manual_pay_date_overrides:
+                                st.warning(
+                                    "Manual pay-date overrides require a newer backend version. "
+                                    "Overrides were ignored for this run."
+                                )
+
+                            legacy_result = build_tax_filing_package(**package_kwargs)
+                            report_payload = (
+                                legacy_result["report"]
+                                if isinstance(legacy_result, dict) and "report" in legacy_result
+                                else legacy_result
+                            )
+                            if not isinstance(report_payload, dict) or "filers" not in report_payload:
+                                raise KeyError("report")
+
+                            fallback_snapshot = annual_snapshots[-1]
+                            fallback_meta = {
+                                "paystub_count_raw": len(annual_snapshots),
+                                "paystub_count_canonical": len(annual_snapshots),
+                                "latest_pay_date": fallback_snapshot.pay_date,
+                                "latest_paystub_file": fallback_snapshot.file,
+                                "extracted": snapshot_to_dict(fallback_snapshot),
+                            }
+                            legacy_meta = legacy_result.get("meta", {}) if isinstance(legacy_result, dict) else {}
+                            analysis_meta = {**fallback_meta, **legacy_meta}
+                            legacy_ledger = legacy_result.get("ledger", []) if isinstance(legacy_result, dict) else []
+                            legacy_raw_ledger = (
+                                legacy_result.get("raw_ledger", legacy_ledger)
+                                if isinstance(legacy_result, dict)
+                                else []
+                            )
+
+                            # Convert legacy to unified structure
+                            # legacy_result: {report, ledger, meta}
+                            # Construct a fake "analysis" object
+                            analysis_obj = {
+                                "public": report_payload["filers"][0],
+                                "internal": {
+                                    "ledger": legacy_ledger,
+                                    "raw_ledger": legacy_raw_ledger,
+                                    "meta": analysis_meta,
+                                },
+                            }
+                            annual_result = {"report": report_payload, "filers_analysis": [analysis_obj]}
+
+                            snapshot = fallback_snapshot
+                            st.session_state["snapshot"] = snapshot
+
+                        st.session_state["annual_summary_preview"] = annual_result
                         st.session_state["analysis_scope"] = "all_year"
-                        source_file = f"ALL ({len(annual_snapshots)} payslips)"
-                        raw_count = len(annual_snapshots)
+                        preview_meta = annual_result["filers_analysis"][0]["internal"]["meta"]
+                        preview_paystub_count = int(preview_meta.get("paystub_count_raw", 0))
+                        source_file = (
+                            "Household Analysis" if household_mode else f"ALL ({preview_paystub_count} payslips)"
+                        )
+                        raw_count = 0 if household_mode else preview_paystub_count
+
                     else:
                         snapshot = extract_paystub_snapshot(Path(selected), render_scale=render_scale)
                         st.session_state["snapshot"] = snapshot
@@ -1737,7 +1961,26 @@ def main() -> None:
 
     active_scope = st.session_state.get("analysis_scope", "single")
     extracted = snapshot_to_dict(snapshot)
-    state_total = sum_state_ytd(snapshot.state_income_tax)
+
+    # Helper for safe state summing
+    def safe_sum_state_ytd(state_data: dict[str, Any]) -> Decimal:
+        total = Decimal("0.00")
+        for state_val in state_data.values():
+            val = None
+            # Handle if state_val is AmountPair object or dict
+            if hasattr(state_val, "ytd"):
+                val = state_val.ytd
+            elif isinstance(state_val, dict):
+                val = state_val.get("ytd")
+            else:
+                val = state_val  # Assume scalar or Decimal
+
+            if val is not None:
+                total += Decimal(str(val))
+        return total
+
+    state_total = safe_sum_state_ytd(snapshot.state_income_tax)
+
     quality_data = cast(dict[str, Any], st.session_state.get("extract_quality", {}))
     if not quality_data:
         quality_data = build_extraction_quality(snapshot)
@@ -1767,64 +2010,120 @@ def main() -> None:
                     metric_card(f"{state} Tax YTD", format_money(pair.ytd))
 
     if active_scope == "all_year":
-        annual_summary_data = st.session_state.get("annual_summary_preview")
-        current_annual_summary: dict[str, Any] | None = None
-        if annual_summary_data:
-            current_annual_summary = cast(dict[str, Any], annual_summary_data)
-        if current_annual_summary:
-            st.markdown("### Whole-Year Summary (From Payslips)")
-            y1, y2, y3, y4 = st.columns(4)
-            with y1:
-                metric_card("Paystubs (Canonical)", str(current_annual_summary["paystub_count_canonical"]))
-            with y2:
-                gross_ytd = current_annual_summary["extracted"]["gross_pay"]["ytd"]
-                metric_card(
-                    "Gross Pay YTD",
-                    format_money(Decimal(str(gross_ytd)) if gross_ytd is not None else None),
-                )
-            with y3:
-                federal_ytd = current_annual_summary["extracted"]["federal_income_tax"]["ytd"]
-                metric_card(
-                    "Federal Tax YTD",
-                    format_money(Decimal(str(federal_ytd)) if federal_ytd is not None else None),
-                )
-            with y4:
-                metric_card("State Tax YTD Total", format_money(state_total))
+        app_annual_result = cast(dict[str, Any] | None, st.session_state.get("annual_summary_preview"))
+        if app_annual_result:
+            # v0.3.0 Multi-Filer Rendering
+            active_filer_id = str(st.session_state.get("active_filer_id", "primary"))
+            filers_analysis = cast(list[dict[str, Any]], app_annual_result.get("filers_analysis", []))
 
-            st.caption(
-                f"Raw paystub files processed: {current_annual_summary['paystub_count_raw']} | "
-                f"Latest pay date: {current_annual_summary['latest_pay_date']}"
-            )
-            st.markdown("#### Per-Payslip Year Ledger")
-            year_ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], current_annual_summary["ledger"]))
-            st.dataframe(
-                style_flagged_rows(
-                    year_ledger_df,
-                    "YTD Verification",
-                    right_align_columns=[
-                        "Gross YTD",
-                        "Federal YTD",
-                        "SS YTD",
-                        "Medicare YTD",
-                        "State YTD Total",
-                    ],
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
-            ytd_flagged = year_ledger_df[year_ledger_df["YTD Verification"] != "—"]
-            if not ytd_flagged.empty:
-                st.warning(
-                    "YTD verification detected parsed-vs-calculated mismatches. "
-                    "Review the rows below and evidence lines."
+            # Find the analysis for active filer
+            target_analysis = next((f for f in filers_analysis if f["public"]["id"] == active_filer_id), None)
+            if not target_analysis and filers_analysis:
+                target_analysis = filers_analysis[0]
+
+            if target_analysis:
+                public = target_analysis["public"]
+                internal = target_analysis["internal"]
+                meta = internal["meta"]
+                extracted = meta["extracted"]
+                state_total = safe_sum_state_ytd(extracted["state_income_tax"])  # re-sum from extracted dict
+
+                st.markdown(f"### Whole-Year Summary: {public['id'].title()} ({public['role']})")
+
+                # Corrections UI
+                with st.expander("Values Verification & Corrections"):
+                    st.info("Overrides applied here will be reflected in the final filing package.")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        # Simple example: Gross Pay Override
+                        curr_gross = extracted["gross_pay"].get("ytd", 0.0)
+                        # Check if already corrected? extracted values ARE effective values in v0.3.0
+                        # But we want to show the underlying correctable value.
+                        # Ideally we show "Original" vs "Effective".
+                        # But `extracted` is already merged.
+                        # So showing `curr_gross` is fine.
+
+                        new_gross = st.number_input(
+                            "Gross Pay YTD",
+                            value=float(curr_gross or 0.0),
+                            step=0.01,
+                            key=f"corr_gross_{active_filer_id}_{st.session_state.get('_run_id', 0)}",
+                        )
+                        if new_gross != float(curr_gross or 0.0):
+                            if st.button("Apply Correction", key=f"apply_{active_filer_id}"):
+                                if "corrections" not in st.session_state:
+                                    st.session_state["corrections"] = {}
+                                if active_filer_id not in st.session_state["corrections"]:
+                                    st.session_state["corrections"][active_filer_id] = {}
+
+                                st.session_state["corrections"][active_filer_id]["gross_pay"] = {
+                                    "value": new_gross,
+                                    "audit_reason": "Manual UI Override",
+                                }
+                                st.rerun()
+
+                y1, y2, y3, y4 = st.columns(4)
+                with y1:
+                    metric_card("Paystubs (Canonical)", str(meta["paystub_count_canonical"]))
+                with y2:
+                    metric_card(
+                        "Gross Pay YTD",
+                        format_money(Decimal(str(extracted["gross_pay"]["ytd"] or 0))),
+                    )
+                with y3:
+                    metric_card(
+                        "Federal Tax YTD",
+                        format_money(Decimal(str(extracted["federal_income_tax"]["ytd"] or 0))),
+                    )
+                with y4:
+                    metric_card("State Tax YTD Total", format_money(state_total))
+
+                st.caption(
+                    f"Raw paystub files processed: {meta['paystub_count_raw']} | "
+                    f"Latest pay date: {meta['latest_pay_date']}"
                 )
-                st.dataframe(ytd_flagged, use_container_width=True, hide_index=True)
-            st.download_button(
-                "Download Year Ledger (.csv)",
-                data=ledger_to_csv(current_annual_summary["ledger"]),
-                file_name=f"paystub_ledger_{int(year)}.csv",
-                mime="text/csv",
-            )
+
+                merge_audit_flags = [
+                    issue.get("message", "")
+                    for issue in cast(list[dict[str, Any]], meta.get("consistency_issues", []))
+                    if issue.get("code") in {"pay_date_override_applied", "duplicate_pay_date"}
+                ]
+                if merge_audit_flags:
+                    with st.expander("Merge / Canonicalization Audit", expanded=False):
+                        for message in merge_audit_flags:
+                            st.markdown(f"- {message}")
+
+                # Ledger Rendering (using internal ledger)
+                st.markdown("#### Per-Payslip Year Ledger")
+                ledger_view_mode = st.radio(
+                    "Ledger View",
+                    options=[
+                        "Canonical (used for calculations)",
+                        "Raw (all uploaded files)",
+                    ],
+                    horizontal=True,
+                    key=f"ledger_view_{active_filer_id}_{year}",
+                )
+                if ledger_view_mode.startswith("Raw"):
+                    ledger_rows = cast(
+                        list[dict[str, Any]],
+                        internal.get("raw_ledger", internal["ledger"]),
+                    )
+                    ledger_df = build_ledger_display_df(ledger_rows, include_calc_columns=True)
+                else:
+                    ledger_df = build_ledger_display_df(cast(list[dict[str, Any]], internal["ledger"]))
+                if not ledger_df.empty:
+                    st.dataframe(ledger_df, use_container_width=True, hide_index=True)
+
+                # Markdown Report Preview
+                st.markdown("#### Filing Packet Preview")
+                # We can generate markdown for just this filer or the whole household?
+                # package_to_markdown takes the whole package.
+                # So we can show the full markdown.
+                md = package_to_markdown(app_annual_result["report"])
+                st.download_button("Download Packet (Markdown)", md, file_name="filing_packet.md")
+                with st.expander("View Full Report"):
+                    st.markdown(md)
 
     st.markdown("### Extracted State Details")
     state_rows = build_state_detail_rows(snapshot)
@@ -2007,12 +2306,25 @@ def main() -> None:
                 psm=6,
             )
             w2_for_packet = selected_w2 if include_w2 else None
-            packet = build_tax_filing_package(
-                tax_year=int(year),
-                snapshots=annual_snapshots,
-                tolerance=tolerance,
-                w2_data=w2_for_packet,
-            )
+            packet_pay_date_overrides = cast(
+                dict[str, dict[str, str]],
+                st.session_state.get("pay_date_overrides", {}),
+            ).get(active_filer_id, {})
+            packet_kwargs: dict[str, Any] = {
+                "tax_year": int(year),
+                "snapshots": annual_snapshots,
+                "tolerance": tolerance,
+                "w2_data": w2_for_packet,
+            }
+            if supports_kwarg(build_tax_filing_package, "pay_date_overrides"):
+                packet_kwargs["pay_date_overrides"] = packet_pay_date_overrides
+            elif packet_pay_date_overrides:
+                st.warning(
+                    "Manual pay-date overrides require a newer backend version. "
+                    "Overrides were ignored for packet generation."
+                )
+
+            packet = build_tax_filing_package(**packet_kwargs)
             st.session_state["annual_packet"] = packet
             st.rerun()
 

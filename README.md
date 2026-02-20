@@ -140,15 +140,15 @@ Outputs:
 
 Ledger CSV includes `ytd_verification` to show any parsed-vs-calculated mismatches or auto-corrections detected for a row.
 
-### 4) Household Filing (v0.2.0)
+### Household Filing (v0.3.0)
 
-Analyze multiple filers (Primary + Optional Spouse) together.
+Analyze multiple filers (Primary + Optional Spouse) together. Supports **multiple W-2s** per filer with strict deduplication.
 
 **Configuration (`household_config.json`):**
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "household_id": "smith_family_2025",
   "filers": [
     {

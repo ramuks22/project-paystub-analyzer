@@ -39,7 +39,7 @@ def test_build_package_success(mocker):
 
     # Check public report for schema
     report = result["report"]
-    assert report["schema_version"] == "0.2.0"
+    assert report["schema_version"] == "0.3.0"
 
     # Safety check
     safety = meta.get("filing_safety", {})

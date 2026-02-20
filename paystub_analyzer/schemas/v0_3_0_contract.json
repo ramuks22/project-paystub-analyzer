@@ -1,0 +1,97 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Tax Filing Package Output (v0.3.0)",
+    "type": "object",
+    "required": [
+        "schema_version",
+        "household_summary",
+        "filers"
+    ],
+    "properties": {
+        "schema_version": {
+            "type": "string",
+            "enum": [
+                "0.3.0"
+            ]
+        },
+        "household_summary": {
+            "type": "object",
+            "required": [
+                "total_gross_pay_cents",
+                "total_fed_tax_cents",
+                "ready_to_file"
+            ],
+            "properties": {
+                "total_gross_pay_cents": {
+                    "type": "integer"
+                },
+                "total_fed_tax_cents": {
+                    "type": "integer"
+                },
+                "ready_to_file": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "filers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "id",
+                    "role",
+                    "w2_aggregate",
+                    "w2_sources"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "role": {
+                        "type": "string"
+                    },
+                    "w2_aggregate": {
+                        "type": "object",
+                        "required": [
+                            "box1_wages_cents",
+                            "box2_fed_tax_cents"
+                        ],
+                        "properties": {
+                            "box1_wages_cents": {
+                                "type": "integer"
+                            },
+                            "box2_fed_tax_cents": {
+                                "type": "integer"
+                            }
+                        }
+                    },
+                    "w2_sources": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": [
+                                "filename",
+                                "employer_ein",
+                                "box1_wages_contribution_cents"
+                            ],
+                            "properties": {
+                                "filename": {
+                                    "type": "string"
+                                },
+                                "employer_ein": {
+                                    "type": "string"
+                                },
+                                "box1_wages_contribution_cents": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "w2_source_count": {
+                        "type": "integer"
+                    }
+                }
+            }
+        }
+    }
+}

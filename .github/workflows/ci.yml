@@ -133,8 +133,8 @@ jobs:
           fi
 
           # Check content validity (simple grep for now, or python script)
-          # Ensuring schema_version 0.2.0 is present
-          if ! grep -q '"schema_version": "0.2.0"' smoke_data/output/package.json; then
+          # Ensuring schema_version 0.3.0 is present
+          if ! grep -q '"schema_version": "0.3.0"' smoke_data/output/package.json; then
              echo "Error: Schema version mismatch or file empty."
              cat smoke_data/output/package.json
              exit 1

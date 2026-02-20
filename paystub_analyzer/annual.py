@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from paystub_analyzer.core import (
     AmountPair,
@@ -108,12 +108,35 @@ def verify_and_repair_state_ytd_anomalies(
             if current_ytd is None:
                 continue
 
+            # For repair heuristics, treat same-pay-date rows as peers in the same cycle
+            # (for example, revision duplicates) and do not use them as temporal neighbors.
             prev_ytd = None
             next_ytd = None
+            current_pay_date = snapshot.pay_date
             if position > 0:
-                prev_ytd = repaired[indices[position - 1]].state_income_tax[state].ytd
+                for candidate_pos in range(position - 1, -1, -1):
+                    candidate_snapshot = repaired[indices[candidate_pos]]
+                    if candidate_snapshot.pay_date == current_pay_date:
+                        continue
+                    prev_ytd = candidate_snapshot.state_income_tax[state].ytd
+                    break
             if position + 1 < len(indices):
-                next_ytd = repaired[indices[position + 1]].state_income_tax[state].ytd
+                for candidate_pos in range(position + 1, len(indices)):
+                    candidate_snapshot = repaired[indices[candidate_pos]]
+                    if candidate_snapshot.pay_date == current_pay_date:
+                        continue
+                    next_ytd = candidate_snapshot.state_income_tax[state].ytd
+                    break
+
+            # Same-cycle peers (same pay date) are useful as a fallback anchor for
+            # OCR underflow repair when a revision row is missing the YTD column.
+            same_cycle_peer_ytds = [
+                repaired[peer_idx].state_income_tax[state].ytd
+                for peer_idx in indices
+                if peer_idx != idx
+                and repaired[peer_idx].pay_date == current_pay_date
+                and repaired[peer_idx].state_income_tax[state].ytd is not None
+            ]
 
             corrected_ytd = None
             corrected_this = pair.this_period
@@ -155,6 +178,27 @@ def verify_and_repair_state_ytd_anomalies(
                     corrected_ytd = prev_ytd
                     corrected_this = None
                     reason = "closing_entry_spike"
+            else:
+                baseline_prev_ytd = max(cast(list[Decimal], same_cycle_peer_ytds)) if same_cycle_peer_ytds else prev_ytd
+
+                if (
+                    baseline_prev_ytd is not None
+                    and pair.this_period is None
+                    and current_ytd < baseline_prev_ytd - STATE_YTD_OUTLIER_MIN_ABS
+                ):
+                    # OCR truncation underflow: The parser saw one number and assumed it was YTD
+                    # but it was actually this_period.
+                    projected_ytd = (baseline_prev_ytd + current_ytd).quantize(Decimal("0.01"))
+                    is_valid_underflow = True
+                    if next_ytd is not None:
+                        # Next YTD should be at least as big as this projected YTD (monotonic)
+                        if next_ytd < projected_ytd - STATE_YTD_NEIGHBOR_TOLERANCE:
+                            is_valid_underflow = False
+
+                    if is_valid_underflow:
+                        corrected_this = current_ytd
+                        corrected_ytd = projected_ytd
+                        reason = "state_ytd_underflow_corrected"
 
             if corrected_ytd is None:
                 continue
@@ -165,10 +209,11 @@ def verify_and_repair_state_ytd_anomalies(
                 f"{state} state tax YTD on {target} was auto-corrected from "
                 f"{format_money(current_ytd)} to {format_money(corrected_ytd)} ({reason})."
             )
+            issue_code = reason if reason == "state_ytd_underflow_corrected" else "state_ytd_outlier_corrected"
             issues.append(
                 ConsistencyIssue(
                     severity="warning",
-                    code="state_ytd_outlier_corrected",
+                    code=issue_code,
                     message=message,
                 )
             )
@@ -452,19 +497,67 @@ def snapshot_quality_tuple(snapshot: PaystubSnapshot) -> tuple[int, Decimal, Dec
     return (completeness, gross, federal, state, snapshot.file)
 
 
+def apply_manual_pay_date_overrides(
+    snapshots: list[PaystubSnapshot],
+    pay_date_overrides: dict[str, str] | None = None,
+) -> tuple[list[PaystubSnapshot], list[ConsistencyIssue]]:
+    if not snapshots:
+        return [], []
+    if not pay_date_overrides:
+        return list(snapshots), []
+
+    adjusted = list(snapshots)
+    issues: list[ConsistencyIssue] = []
+    for idx, snapshot in enumerate(adjusted):
+        file_path = Path(snapshot.file)
+        override_value = (
+            pay_date_overrides.get(snapshot.file)
+            or pay_date_overrides.get(str(file_path))
+            or pay_date_overrides.get(file_path.name)
+        )
+        if not override_value:
+            continue
+        try:
+            normalized = date.fromisoformat(str(override_value)).isoformat()
+        except ValueError:
+            continue
+        if normalized == snapshot.pay_date:
+            continue
+
+        adjusted[idx] = replace(snapshot, pay_date=normalized)
+        issues.append(
+            ConsistencyIssue(
+                severity="warning",
+                code="pay_date_override_applied",
+                message=(
+                    f"Applied manual pay date override for `{snapshot.file}`: " f"{snapshot.pay_date} -> {normalized}"
+                ),
+            )
+        )
+
+    adjusted.sort(key=snapshot_sort_key)
+    return adjusted, issues
+
+
 def deduplicate_by_pay_date(
     snapshots: list[PaystubSnapshot],
+    pay_date_overrides: dict[str, str] | None = None,
 ) -> tuple[list[PaystubSnapshot], list[ConsistencyIssue]]:
+    normalized_snapshots, override_issues = apply_manual_pay_date_overrides(
+        snapshots,
+        pay_date_overrides=pay_date_overrides,
+    )
+
     grouped: dict[str, list[PaystubSnapshot]] = {}
     no_date: list[PaystubSnapshot] = []
-    for snapshot in snapshots:
+    for snapshot in normalized_snapshots:
         if snapshot.pay_date is None:
             no_date.append(snapshot)
             continue
         grouped.setdefault(snapshot.pay_date, []).append(snapshot)
 
     canonical: list[PaystubSnapshot] = []
-    issues: list[ConsistencyIssue] = []
+    issues: list[ConsistencyIssue] = list(override_issues)
     for pay_date in sorted(grouped):
         group = grouped[pay_date]
         if len(group) == 1:
@@ -490,12 +583,42 @@ def deduplicate_by_pay_date(
     return canonical, issues
 
 
+def annotate_raw_ledger_rows(
+    raw_rows: list[dict[str, Any]],
+    canonical_snapshots: list[PaystubSnapshot],
+) -> list[dict[str, Any]]:
+    canonical_files = {snapshot.file for snapshot in canonical_snapshots}
+    canonical_file_by_date = {
+        snapshot.pay_date: snapshot.file for snapshot in canonical_snapshots if snapshot.pay_date is not None
+    }
+    annotated: list[dict[str, Any]] = []
+    for row in raw_rows:
+        file_path = str(row.get("file", ""))
+        pay_date = cast(str | None, row.get("pay_date"))
+        included = file_path in canonical_files
+
+        canonical_file = None
+        if pay_date is not None:
+            canonical_file = canonical_file_by_date.get(pay_date)
+        if canonical_file is None and included:
+            canonical_file = file_path
+
+        status = "Included" if included else "Ignored (duplicate for pay date)"
+        row_copy = dict(row)
+        row_copy["calculation_status"] = status
+        row_copy["canonical_file"] = canonical_file
+        annotated.append(row_copy)
+
+    return annotated
+
+
 def run_consistency_checks(
     snapshots: list[PaystubSnapshot],
     tolerance: Decimal,
+    pay_date_overrides: dict[str, str] | None = None,
 ) -> list[ConsistencyIssue]:
     issues: list[ConsistencyIssue] = []
-    canonical, duplicate_issues = deduplicate_by_pay_date(snapshots)
+    canonical, duplicate_issues = deduplicate_by_pay_date(snapshots, pay_date_overrides=pay_date_overrides)
     issues.extend(duplicate_issues)
 
     issues.extend(
@@ -703,6 +826,8 @@ def analyze_filer(
     w2_data: dict[str, Any] | None,
     filer_id: str,
     role: str,
+    corrections: dict[str, Any] | None = None,
+    pay_date_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Analyze a single filer's paystubs and W-2s.
@@ -717,8 +842,14 @@ def analyze_filer(
         # But existing logic raises ValueError. Let's keep strict for now.
         raise ValueError(f"No snapshots available for filer {filer_id}.")
 
-    verified_snapshots, ytd_repair_issues, verification_notes_by_file = verify_and_repair_state_ytd_anomalies(
+    # Apply overrides first so chronology-sensitive repair logic (for example
+    # state YTD underflow recovery) uses the user-assigned pay-cycle timeline.
+    normalized_snapshots, override_issues = apply_manual_pay_date_overrides(
         snapshots,
+        pay_date_overrides=pay_date_overrides,
+    )
+    verified_snapshots, ytd_repair_issues, verification_notes_by_file = verify_and_repair_state_ytd_anomalies(
+        normalized_snapshots,
         tolerance=tolerance,
     )
     canonical_snapshots, duplicate_issues = deduplicate_by_pay_date(verified_snapshots)
@@ -732,9 +863,17 @@ def analyze_filer(
         canonical_snapshots,
         verification_notes_by_file=combined_notes,
     )
+    raw_ledger = annotate_raw_ledger_rows(
+        build_ledger_rows(
+            verified_snapshots,
+            verification_notes_by_file=verification_notes_by_file,
+        ),
+        canonical_snapshots=canonical_snapshots,
+    )
     issues = (
         ytd_repair_issues
         + ytd_calc_issues
+        + override_issues
         + duplicate_issues
         + run_consistency_checks(canonical_snapshots, tolerance=tolerance)
     )
@@ -748,9 +887,18 @@ def analyze_filer(
 
     # New Filing Mode Safety Check
     from paystub_analyzer.filing_rules import validate_filing_safety
+    from paystub_analyzer.utils.corrections import merge_corrections
 
+    # Convert to v0.2.0 Schema (Integer Cents)
+    raw_extracted = extracted_summary(final_snapshot)
+
+    # APPLY CORRECTIONS (v0.3.0 Phase 2)
+    # corrections arg passed to analyze_filer (default None)
+    effective_extracted, correction_audit = merge_corrections(raw_extracted, corrections or {})
+
+    # Validate based on EFFECTIVE (Corrected) values
     filing_safety = validate_filing_safety(
-        extracted_data=extracted_summary(final_snapshot),
+        extracted_data=effective_extracted,
         comparisons=comparisons,
         consistency_issues=[issue.__dict__ for issue in issues],
         tolerance=tolerance,
@@ -758,39 +906,100 @@ def analyze_filer(
 
     ready_to_file = filing_safety.passed and bool(w2_data)
 
-    # Convert to v0.2.0 Schema (Integer Cents)
-    extracted = extracted_summary(final_snapshot)
-
     # Helper to convert decimal/float to cents
     def to_cents(x: dict[str, Any] | None) -> int:
+        # x is now the inner dict like {"ytd": 123.45} from effective_extracted
         if x and x.get("ytd") is not None:
             return int(round(x["ytd"] * 100))
         return 0
 
-    state_tax_cents = {k: to_cents(v) for k, v in extracted["state_income_tax"].items()}
+    state_tax_cents = {k: to_cents(v) for k, v in effective_extracted["state_income_tax"].items()}
 
     filer_report = {
         "id": filer_id,
         "role": role,
-        "gross_pay_cents": to_cents(extracted["gross_pay"]),
-        "fed_tax_cents": to_cents(extracted["federal_income_tax"]),
+        "gross_pay_cents": to_cents(effective_extracted["gross_pay"]),
+        "fed_tax_cents": to_cents(effective_extracted["federal_income_tax"]),
         "state_tax_by_state_cents": state_tax_cents,
         "status": "MATCH" if ready_to_file else "REVIEW_NEEDED",
-        "audit_flags": [err for err in filing_safety.errors] + [warn for warn in filing_safety.warnings],
+        "audit_flags": sorted(
+            [err for err in filing_safety.errors]
+            + [warn for warn in filing_safety.warnings]
+            + (w2_data.get("processing_warnings", []) if w2_data else [])
+            + correction_audit  # Add correction logs
+        ),
     }
+
+    # v0.3.0 Multi-W2 Metadata
+    if w2_data:
+        filer_report["w2_source_count"] = w2_data.get("w2_source_count", 1)
+        # Assuming single-file inputs might not have these keys if bypassed via legacy loader?
+        # But we updated the CLI loader. If direct callers use legacy w2_loader dicts, we should fallback.
+        # v0.3.0: Copy aggregated W-2 data.
+        # w2_data has keys: 'w2_aggregate' (cents), 'w2_sources', 'state_boxes'
+        # We want to preserve 'state_boxes' inside 'w2_aggregate' for the report, or alongside it.
+        # contracts Output Filer schema says: w2_aggregate: W2Aggregate
+        # W2Aggregate has: box1..., state_boxes: list[StateBox]
+        # So we must merge them.
+        w2_agg = w2_data.get("w2_aggregate", {}).copy()
+        if "state_boxes" in w2_data:
+            w2_agg["state_boxes"] = w2_data["state_boxes"]
+
+        filer_report["w2_aggregate"] = w2_agg
+        filer_report["w2_sources"] = w2_data.get("w2_sources")
+
+        # Backfill if missing (e.g. single W-2 loaded directly without aggregator)
+        # Check if we have the cents keys, otherwise derive from top-level floats
+        # cast to dict to satisfy mypy
+        w2_agg_cast = cast(dict[str, Any], filer_report["w2_aggregate"])
+        if "box1_wages_cents" not in w2_agg_cast:
+            w2_agg_cast.update(
+                {
+                    "box1_wages_cents": int((w2_data.get("box_1_wages_tips_other_comp") or 0.0) * 100),
+                    "box2_fed_tax_cents": int((w2_data.get("box_2_federal_income_tax_withheld") or 0.0) * 100),
+                    "box4_social_security_tax_cents": int(
+                        (w2_data.get("box_4_social_security_tax_withheld") or 0.0) * 100
+                    ),
+                    "box6_medicare_tax_cents": int((w2_data.get("box_6_medicare_tax_withheld") or 0.0) * 100),
+                }
+            )
+        if not filer_report["w2_sources"]:
+            filer_report["w2_sources"] = [
+                {
+                    "filename": "legacy_implicit_source",
+                    "control_number": str(w2_data.get("control_number", "UNKNOWN")),
+                    "employer_ein": str(w2_data.get("employer_ein", "UNKNOWN")),
+                    "box1_wages_contribution_cents": cast(dict[str, Any], filer_report["w2_aggregate"])[
+                        "box1_wages_cents"
+                    ],
+                }
+            ]
+
+    if "w2_aggregate" not in filer_report:
+        filer_report["w2_aggregate"] = {
+            "box1_wages_cents": 0,
+            "box2_fed_tax_cents": 0,
+            "box4_social_security_tax_cents": 0,
+            "box6_medicare_tax_cents": 0,
+        }
+    if "w2_sources" not in filer_report:
+        filer_report["w2_sources"] = []
+    if "w2_source_count" not in filer_report:
+        filer_report["w2_source_count"] = 0
 
     return {
         "public": filer_report,
         "internal": {
             "report": filer_report,  # Legacy prop for single-return compat
             "ledger": ledger,
+            "raw_ledger": raw_ledger,
             "meta": {
                 "tax_year": tax_year,
                 "paystub_count_raw": len(snapshots),
                 "paystub_count_canonical": len(canonical_snapshots),
                 "latest_pay_date": final_snapshot.pay_date,
                 "latest_paystub_file": final_snapshot.file,
-                "extracted": extracted,
+                "extracted": effective_extracted,
                 "authenticity_score": assessment["score"],
                 "filing_safety": filing_safety._asdict(),
                 "consistency_issues": [issue.__dict__ for issue in issues],
@@ -807,6 +1016,8 @@ def build_household_package(
     snapshot_loader: Callable[[dict[str, Any]], list[PaystubSnapshot]],
     w2_loader: Callable[[dict[str, Any]], dict[str, Any] | None],
     tolerance: Decimal,
+    corrections: dict[str, Any] | None = None,
+    pay_date_overrides: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """
     Orchestrate household analysis.
@@ -814,6 +1025,8 @@ def build_household_package(
     w2_loader: fn(source_config) -> w2_data OR None
     """
     filers = household_config["filers"]
+    corrections = corrections or {}
+    pay_date_overrides = pay_date_overrides or {}
 
     # 1. Validation: Cardinality
     roles = [f["role"] for f in filers]
@@ -862,6 +1075,8 @@ def build_household_package(
             w2_data=w2_data,
             filer_id=filer_id,
             role=role,
+            corrections=corrections.get(filer_id),
+            pay_date_overrides=pay_date_overrides.get(filer_id),
         )
 
         filer_public = analysis["public"]
@@ -882,7 +1097,7 @@ def build_household_package(
     }
 
     public_report = {
-        "schema_version": "0.2.0",
+        "schema_version": "0.3.0",
         "household_summary": household_summary,
         "filers": [r["public"] for r in results],
     }
@@ -890,7 +1105,7 @@ def build_household_package(
     # Validate Contract
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(public_report, "annual_summary", mode="FILING")
+    validate_output(public_report, "v0_3_0_contract", mode="FILING")
 
     # Composite return (list of internal results + aggregate report)
     return {
@@ -905,6 +1120,7 @@ def build_tax_filing_package(
     snapshots: list[PaystubSnapshot],
     tolerance: Decimal,
     w2_data: dict[str, Any] | None,
+    pay_date_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
     Detailed single-filer analysis (Legacy Entry Point).
@@ -917,6 +1133,7 @@ def build_tax_filing_package(
         w2_data=w2_data,
         filer_id="primary",
         role="PRIMARY",
+        pay_date_overrides=pay_date_overrides,
     )
 
     # Re-construct the legacy composite package structure
@@ -936,7 +1153,7 @@ def build_tax_filing_package(
     filer_report = analysis["public"]
 
     public_report = {
-        "schema_version": "0.2.0",
+        "schema_version": "0.3.0",
         "household_summary": {
             "total_gross_pay_cents": filer_report["gross_pay_cents"],
             "total_fed_tax_cents": filer_report["fed_tax_cents"],
@@ -948,22 +1165,22 @@ def build_tax_filing_package(
     # Validate Contract
     from paystub_analyzer.utils.contracts import validate_output
 
-    validate_output(public_report, "annual_summary", mode="FILING")
+    validate_output(public_report, "v0_3_0_contract", mode="FILING")
 
     return {
         "report": public_report,
         "ledger": internal["ledger"],
+        "raw_ledger": internal.get("raw_ledger", internal["ledger"]),
         "meta": internal["meta"],
     }
 
 
 def package_to_markdown(package: dict[str, Any]) -> str:
     household = package["household_summary"]
-    primary = package["filers"][0]
 
     lines: list[str] = []
 
-    lines.append("# Tax Filing Packet (v0.2.0)")
+    lines.append("# Tax Filing Packet (v0.3.0)")
     lines.append("")
     lines.append(f"- Schema Version: {package['schema_version']}")
     lines.append(f"- Ready to file: `{household['ready_to_file']}`")
@@ -974,14 +1191,68 @@ def package_to_markdown(package: dict[str, Any]) -> str:
     lines.append(f"- Total Fed Tax: ${household['total_fed_tax_cents'] / 100:,.2f}")
     lines.append("")
 
-    lines.append("## Primary Filer")
-    lines.append(f"- Gross Pay: ${primary['gross_pay_cents'] / 100:,.2f}")
-    lines.append(f"- Fed Tax: ${primary['fed_tax_cents'] / 100:,.2f}")
-    lines.append(f"- Status: {primary['status']}")
+    for filer in package["filers"]:
+        # Capitalize role or name
+        header_title = filer.get("id", "Filer").title()
+        if filer.get("role"):
+            header_title += f" ({filer['role']})"
 
-    if primary["audit_flags"]:
-        lines.append("### Audit Flags")
-        for flag in primary["audit_flags"]:
-            lines.append(f"- {flag}")
+        lines.append(f"## {header_title}")
+        lines.append(f"- Gross Pay: ${filer['gross_pay_cents'] / 100:,.2f}")
+        lines.append(f"- Fed Tax: ${filer['fed_tax_cents'] / 100:,.2f}")
+        lines.append(f"- Status: {filer['status']}")
+
+        # W-2 Summary if present
+        if filer.get("w2_source_count", 0) > 0:
+            lines.append(f"- W-2 Sources: {filer['w2_source_count']}")
+            agg = filer.get("w2_aggregate", {})
+            if agg:
+                w2_wages = agg.get("box1_wages_cents", 0) / 100
+                lines.append(f"- W-2 Wages (Box 1): ${w2_wages:,.2f}")
+
+        if filer.get("audit_flags"):
+            lines.append("### Audit Flags")
+            for flag in filer["audit_flags"]:
+                lines.append(f"- {flag}")
+
+        # State Tax Verification (v0.3.0 Phase 2)
+        # Compare Paystub YTD vs W-2 Box 17
+        paystub_states = filer.get("state_tax_by_state_cents", {})
+
+        # W-2 data structure is complex. w2_aggregate -> state_boxes (list of dicts)
+        w2_aggregate = filer.get("w2_aggregate", {})
+        w2_state_map = {}
+        if w2_aggregate and "state_boxes" in w2_aggregate:
+            for sbox in w2_aggregate["state_boxes"]:
+                st_code = sbox.get("state", "??")
+                # W-2 aggregator returns floats. Convert to cents for comparison.
+                tax_float = sbox.get("box_17_state_income_tax", 0.0)
+                w2_state_map[st_code] = int(round(tax_float * 100))
+
+        all_states = sorted(set(paystub_states.keys()) | set(w2_state_map.keys()))
+
+        if all_states:
+            lines.append("")
+            lines.append("### State Tax Verification")
+            lines.append("| State | Paystub YTD | W-2 Box 17 | Difference | Status |")
+            lines.append("| :--- | :--- | :--- | :--- | :--- |")
+
+            for st in all_states:
+                ps_cents = paystub_states.get(st, 0)
+                w2_cents = w2_state_map.get(st, 0)
+                diff = ps_cents - w2_cents
+                status = "MATCH" if abs(diff) < 100 else "MISMATCH"  # Tolerance $1.00? Or strict?
+                # Contracts say cents-based. Let's start with strict 0 or small epsilon.
+                # Actually, rounding issues might exist. $1.00 is reasonable for visual flag?
+                # User asked for "State Tax Verification".
+
+                # Format money
+                ps_str = f"${ps_cents/100:,.2f}" if st in paystub_states else "—"
+                w2_str = f"${w2_cents/100:,.2f}" if st in w2_state_map else "—"
+                diff_str = f"${diff/100:,.2f}"
+
+                lines.append(f"| {st} | {ps_str} | {w2_str} | {diff_str} | {status} |")
+
+        lines.append("")
 
     return "\n".join(lines)

@@ -149,6 +149,43 @@ def extract_tax_year(lines: list[str], fallback_year: int | None = None) -> int 
     return fallback_year
 
 
+def extract_ein(lines: list[str]) -> str | None:
+    """
+    Extracts Employer Identification Number (EIN).
+    Looks for standard format XX-XXXXXXX.
+    """
+    ein_pattern = re.compile(r"\b\d{2}-\d{7}\b")
+    for line in lines:
+        match = ein_pattern.search(line)
+        if match:
+            return match.group(0)
+    return None
+
+
+def extract_control_number(lines: list[str]) -> str | None:
+    """
+    Extracts Control Number (Box d).
+    Heuristic: Look for 'Control number' label, then check that line or next lines for a value.
+    Since control numbers vary wildly in format, we assume it's a non-empty string near the label
+    that isn't a money value or other label.
+    """
+    for i, line in enumerate(lines):
+        if "control number" in line.lower() and "box" not in line.lower():
+            # Check if value is on same line (e.g. "d Control number 12345")
+            # But usually standard forms have it below.
+            # Let's check the NEXT line that isn't empty.
+            if i + 1 < len(lines):
+                candidate = lines[i + 1].strip()
+                # Simple heuristic: if it looks like a value (alphanumeric, > 3 chars)
+                if len(candidate) > 2:
+                    return candidate
+            if i + 2 < len(lines):  # sometimes a blank line in between
+                candidate = lines[i + 2].strip()
+                if len(candidate) > 2:
+                    return candidate
+    return None
+
+
 def extract_w2_from_lines(lines: list[str], fallback_year: int | None = None) -> dict[str, Any]:
     box_specs: dict[str, tuple[list[re.Pattern[str]], int]] = {
         "box_1_wages_tips_other_comp": (
@@ -204,8 +241,13 @@ def extract_w2_from_lines(lines: list[str], fallback_year: int | None = None) ->
 
     state_boxes, state_evidence = extract_state_boxes(lines)
 
+    ein = extract_ein(lines)
+    control_number = extract_control_number(lines)
+
     return {
         "tax_year": extract_tax_year(lines, fallback_year=fallback_year),
+        "employer_ein": ein,
+        "control_number": control_number,
         "box_1_wages_tips_other_comp": values["box_1_wages_tips_other_comp"],
         "box_2_federal_income_tax_withheld": values["box_2_federal_income_tax_withheld"],
         "box_3_social_security_wages": values["box_3_social_security_wages"],

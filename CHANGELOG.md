@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-20
+
+### Added
+- **Multi-W2 Aggregation**: Support for summing amounts from multiple W-2 forms per filer.
+- **Strict Deduplication**: Logic to prevent processing the same W-2 twice (Idempotency).
+- **Corrections Engine**: `corrections.json` override schema with integration into the primary computation pipeline to edit YTD amounts.
+- **Real E2E Testing**: `scripts/generate_e2e_fixtures.py` and `tests/test_e2e_real.py` using `reportlab`.
+
+### Changed
+- **Schema Version**: Bumped output schema to `"0.3.0"`.
+- **Output Contract**: `package.json` now includes `w2_aggregate` and `w2_sources` fields.
+- **Sanitization**: Removed all hardcoded user data from `tests/test_annual.py`.
+
+### Fixed
+- **OCR State YTD Underflow**: Engine now detects when a YTD amount is lost in OCR truncation and auto-heals using previous continuity blocks.
+- **Missing Correction Keys**: `box3` and `box5` mappings now natively initialize if they were not historically extracted from the paystub.
+- **State Tax Nested Overrides**: Handled regex paths (`state_income_tax_[A-Z]{2}`) inside `corrections.py` to enforce state-level accuracy.
+- **Validation**: Strict schema rejection and Python warnings added for "bare" `state_income_tax` keys.
+
 ## [0.2.0-alpha.2] - 2026-02-18
 
 ### Fixed

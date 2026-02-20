@@ -20,7 +20,6 @@ from paystub_analyzer.annual import (
     package_to_markdown,
 )
 from paystub_analyzer.core import format_money
-from paystub_analyzer.w2_pdf import w2_pdf_to_json_payload
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -90,6 +89,7 @@ def main() -> None:
     parser.add_argument("--package-md-out", type=Path, default=None, help="Markdown output path.")
     parser.add_argument("--force", action="store_true", help="Generate even if checks fail.")
     parser.add_argument("--household-config", type=Path, default=None, help="Household config JSON.")
+    parser.add_argument("--corrections-json", type=Path, default=None, help="JSON file with user corrections.")
     parser.add_argument("--interactive", action="store_true", help="Enable interactive prompts.")
 
     args = parser.parse_args()
@@ -130,13 +130,30 @@ def main() -> None:
     # Construct Household Configuration
     household_config: dict[str, Any]
     base_dir: Path
+    corrections: dict[str, Any] = {}
 
     console.print_step("Configuration")
+
+    if args.corrections_json:
+        if not args.corrections_json.exists():
+            console.print_error(f"Corrections file not found: {args.corrections_json}", exit_code=1)
+        console.print_success(f"Loaded corrections: {args.corrections_json}")
+        corrections = read_json(args.corrections_json)
+        try:
+            validate_output(corrections, "corrections", mode="FILING")
+        except Exception as e:
+            console.print_error(f"Invalid corrections configuration: {e}", exit_code=1)
 
     if args.household_config:
         if not args.household_config.exists():
             console.print_error(f"Household config file not found: {args.household_config}", exit_code=1)
         household_config = read_json(args.household_config)
+
+        # Migrate v0.2 -> v0.3
+        from paystub_analyzer.utils.migration import migrate_household_config_v0_2_to_v0_3
+
+        household_config = migrate_household_config_v0_2_to_v0_3(household_config)
+
         # Validate Input Contract
         try:
             validate_output(household_config, "household_config", mode="FILING")
@@ -154,7 +171,7 @@ def main() -> None:
 
         w2_files = [str(args.w2_pdf)] if args.w2_pdf else []
         household_config = {
-            "version": "0.2.0",
+            "version": "0.3.0",
             "household_id": "legacy_implicit",
             "filers": [
                 {
@@ -185,13 +202,14 @@ def main() -> None:
     def w2_loader(source_cfg: dict[str, Any]) -> dict[str, Any] | None:
         if not args.household_config and args.w2_json:
             return read_json(args.w2_json)
+
         files = source_cfg.get("w2_files", [])
         if not files:
             return None
-        if len(files) > 1:
-            raise NotImplementedError("Multiple W-2 files per filer not supported.")
-        fpath = base_dir / files[0]
-        return w2_pdf_to_json_payload(fpath, args.w2_render_scale, 6, args.year)
+
+        from paystub_analyzer.w2_aggregator import load_and_aggregate_w2s
+
+        return load_and_aggregate_w2s(files, base_dir, args.year, args.w2_render_scale)
 
     from paystub_analyzer.annual import build_household_package
 
@@ -203,6 +221,7 @@ def main() -> None:
             snapshot_loader=snapshot_loader,
             w2_loader=w2_loader,
             tolerance=args.tolerance,
+            corrections=corrections,
         )
     except Exception as e:
         console.print_error(f"Error building package: {e}", exit_code=1)

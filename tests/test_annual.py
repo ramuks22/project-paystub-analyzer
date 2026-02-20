@@ -55,6 +55,164 @@ class AnnualTests(unittest.TestCase):
         )
         self.assertTrue(result["report"]["household_summary"]["ready_to_file"])
 
+    def test_repairs_state_ytd_underflow(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-09-15.pdf",
+            pay_date="2025-09-15",
+            gross_pay=pair("5050.00", "93450.05"),
+            federal_income_tax=pair("658.80", "12278.47"),
+            social_security_tax=pair("296.72", "5436.90"),
+            medicare_tax=pair("69.40", "1270.89"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={
+                "AZ": pair("84.61", "498.26"),
+                "VA": pair("127.21", "3193.41"),
+            },
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-09-30.pdf",
+            pay_date="2025-09-30",
+            gross_pay=pair("5050.00", "98500.05"),
+            federal_income_tax=pair("658.80", "12937.27"),
+            social_security_tax=pair("296.73", "5733.63"),
+            medicare_tax=pair("69.39", "1340.28"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={
+                "AZ": pair("84.61", "582.87"),
+                "VA": pair("127.21", "3320.62"),
+            },
+            normalized_lines=[],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-10-15.pdf",
+            pay_date="2025-10-15",
+            gross_pay=pair("5050.00", "103550.05"),
+            federal_income_tax=pair("658.80", "13596.07"),
+            social_security_tax=pair("296.72", "6030.35"),
+            medicare_tax=pair("69.40", "1409.68"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={
+                "AZ": pair("84.61", "667.48"),
+                "VA": pair("127.21", "3447.83"),
+            },
+            normalized_lines=[],
+        )
+        # This snapshot has an underflow for VA.
+        # The YTD for VA is 132.77, but the previous YTD was 3447.83.
+        # This implies a negative "this period" amount, which is impossible.
+        # The OCR likely misread the YTD as the "this period" amount.
+        s4 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-10-31.pdf",
+            pay_date="2025-10-31",
+            gross_pay=pair("5050.00", "108600.05"),
+            federal_income_tax=pair("658.80", "14254.87"),
+            social_security_tax=pair("296.73", "6327.08"),
+            medicare_tax=pair("69.39", "1479.07"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={
+                "AZ": pair("84.61", "752.09"),
+                "VA": pair(None, "132.77"),
+            },
+            normalized_lines=[],
+        )
+
+        package = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3, s4],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+        ledger = package["ledger"]
+        row_1031 = next(r for r in ledger if r["pay_date"] == "2025-10-31")
+
+        # Test the OCR Underflow Auto Heal!
+        # The raw input s4 had VA: pair(None, 132.77)
+        # Prev s3 had VA YTD: 3447.83
+        # It should heal to This: 132.77 -> YTD = 3447.83 + 132.77 = 3580.60
+        # AZ had None this period and 752.09 YTD, which carries over.
+        # So Total YTD should be 3580.60 + 752.09 = 4332.69
+        self.assertEqual(row_1031["state_tax_ytd_by_state"]["VA"], 3580.60)
+        self.assertEqual(row_1031["state_tax_this_period_by_state"]["VA"], 132.77)
+        self.assertEqual(row_1031["state_tax_ytd_by_state"]["AZ"], 752.09)
+        self.assertEqual(row_1031["state_tax_ytd_total"], 4332.69)
+
+        issues = package["meta"]["consistency_issues"]
+        # Verify the warning was emitted
+        self.assertTrue(any(iss["code"] == "state_ytd_underflow_corrected" for iss in issues))
+
+        self.assertEqual(len(package["ledger"]), 4)
+
+    def test_override_applied_before_underflow_repair(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-09-15.pdf",
+            pay_date="2025-09-15",
+            gross_pay=pair("1836.36", "88336.41"),
+            federal_income_tax=pair("121.77", "11923.84"),
+            social_security_tax=pair("97.48", "5198.42"),
+            medicare_tax=pair("22.80", "1215.76"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("46.76", "3240.17"), "AZ": pair(None, "498.26")},
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-09-30.pdf",
+            pay_date="2025-09-30",
+            gross_pay=pair("5050.00", "96600.05"),
+            federal_income_tax=pair("658.80", "12941.30"),
+            social_security_tax=pair("296.72", "5694.39"),
+            medicare_tax=pair("69.39", "1331.75"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("211.22", "3584.16"), "AZ": pair(None, "498.26")},
+            normalized_lines=[],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-09-30_01.pdf",
+            pay_date="2025-09-30",
+            gross_pay=pair("3213.64", "91550.05"),
+            federal_income_tax=pair("358.66", "12282.50"),
+            social_security_tax=pair("199.25", "5397.67"),
+            medicare_tax=pair("46.60", "1262.36"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair(None, "132.77"), "AZ": pair(None, "498.26")},
+            normalized_lines=[],
+        )
+
+        package = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+            pay_date_overrides={"Pay Date 2025-09-30_01.pdf": "2025-09-15"},
+        )
+
+        revised_row = next(
+            row for row in package["raw_ledger"] if row["file"] == "pay_statements/Pay Date 2025-09-30_01.pdf"
+        )
+        original_row = next(
+            row for row in package["raw_ledger"] if row["file"] == "pay_statements/Pay Date 2025-09-15.pdf"
+        )
+
+        # Expected from override-first chronology:
+        # VA corrected YTD = 3240.17 + 132.77 = 3372.94
+        self.assertEqual(revised_row["pay_date"], "2025-09-15")
+        self.assertEqual(revised_row["state_tax_this_period_by_state"]["VA"], 132.77)
+        self.assertEqual(revised_row["state_tax_ytd_by_state"]["VA"], 3372.94)
+        self.assertEqual(revised_row["state_tax_ytd_total"], 3871.20)
+
+        self.assertTrue(str(revised_row["calculation_status"]).startswith("Included"))
+        self.assertTrue(str(original_row["calculation_status"]).startswith("Ignored"))
+        self.assertEqual(original_row["canonical_file"], revised_row["file"])
+
+        issues = package["meta"]["consistency_issues"]
+        self.assertTrue(any(iss["code"] == "state_ytd_underflow_corrected" for iss in issues))
+        self.assertTrue(
+            any(
+                "VA state tax YTD on 2025-09-15" in iss["message"] and iss["code"] == "state_ytd_underflow_corrected"
+                for iss in issues
+            )
+        )
+
     def test_repairs_opening_state_ytd_outlier(self) -> None:
         s1 = PaystubSnapshot(
             file="pay_statements/Pay Date 2025-04-15.pdf",

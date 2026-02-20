@@ -2,7 +2,7 @@ import pytest
 from paystub_analyzer.utils.contracts import validate_output, ContractError
 
 VALID_ANNUAL_SUMMARY = {
-    "schema_version": "0.2.0",
+    "schema_version": "0.3.0",
     "household_summary": {"total_gross_pay_cents": 15000000, "total_fed_tax_cents": 3500000, "ready_to_file": False},
     "filers": [
         {
@@ -13,6 +13,21 @@ VALID_ANNUAL_SUMMARY = {
             "state_tax_by_state_cents": {"CA": 5000},
             "status": "MATCH",
             "audit_flags": [],
+            "w2_source_count": 1,
+            "w2_aggregate": {
+                "box1_wages_cents": 10000000,
+                "box2_fed_tax_cents": 2500000,
+                "box4_social_security_tax_cents": 620000,
+                "box6_medicare_tax_cents": 145000,
+            },
+            "w2_sources": [
+                {
+                    "filename": "w2.pdf",
+                    "control_number": "CTRL123",
+                    "employer_ein": "12-3456789",
+                    "box1_wages_contribution_cents": 10000000,
+                }
+            ],
         }
     ],
 }
@@ -20,7 +35,7 @@ VALID_ANNUAL_SUMMARY = {
 
 def test_validate_annual_summary_valid():
     """Should pass for valid data."""
-    validate_output(VALID_ANNUAL_SUMMARY, "annual_summary")
+    validate_output(VALID_ANNUAL_SUMMARY, "v0_3_0_contract")
 
 
 def test_validate_annual_summary_invalid_type():
@@ -32,7 +47,7 @@ def test_validate_annual_summary_invalid_type():
         "ready_to_file": False,
     }
     with pytest.raises(ContractError) as excinfo:
-        validate_output(invalid_data, "annual_summary", mode="FILING")
+        validate_output(invalid_data, "v0_3_0_contract", mode="FILING")
     assert "Data Contract Violation" in str(excinfo.value)
 
 
@@ -41,7 +56,7 @@ def test_validate_annual_summary_missing_field():
     invalid_data = VALID_ANNUAL_SUMMARY.copy()
     del invalid_data["schema_version"]
     with pytest.raises(ContractError):
-        validate_output(invalid_data, "annual_summary", mode="FILING")
+        validate_output(invalid_data, "v0_3_0_contract", mode="FILING")
 
 
 def test_validate_review_mode_warning(capsys):
@@ -49,6 +64,6 @@ def test_validate_review_mode_warning(capsys):
     invalid_data = VALID_ANNUAL_SUMMARY.copy()
     del invalid_data["schema_version"]
 
-    validate_output(invalid_data, "annual_summary", mode="REVIEW")
+    validate_output(invalid_data, "v0_3_0_contract", mode="REVIEW")
     captured = capsys.readouterr()
     assert "WARNING: Data Contract Violation" in captured.out

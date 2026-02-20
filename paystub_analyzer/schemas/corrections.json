@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Paystub Analyzer Corrections (v0.3.0)",
+  "description": "User-supplied overrides for extracted data, keyed by filer ID.",
+  "type": "object",
+  "patternProperties": {
+    "^[a-zA-Z0-9_-]+$": {
+      "description": "Corrections for a specific filer (e.g. 'primary', 'spouse').",
+      "type": "object",
+      "properties": {
+        "box1": { "$ref": "#/definitions/correctionEntry" },
+        "box2": { "$ref": "#/definitions/correctionEntry" },
+        "box3": { "$ref": "#/definitions/correctionEntry" },
+        "box4": { "$ref": "#/definitions/correctionEntry" },
+        "box5": { "$ref": "#/definitions/correctionEntry" },
+        "box6": { "$ref": "#/definitions/correctionEntry" }
+      },
+      "patternProperties": {
+        "^state_income_tax_[A-Z]{2}$": { "$ref": "#/definitions/correctionEntry" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "correctionEntry": {
+      "type": "object",
+      "required": ["value", "audit_reason"],
+      "properties": {
+        "value": {
+          "type": ["number", "string", "null"],
+          "description": "The corrected value (float for money, string for text)."
+        },
+        "audit_reason": {
+          "type": "string",
+          "description": "Reason for the correction (e.g. 'OCR Error', 'User Verification')."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

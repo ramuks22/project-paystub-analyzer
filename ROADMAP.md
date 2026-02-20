@@ -1,6 +1,6 @@
 # Project Paystub Analyzer Roadmap (v0.2.0 - v1.0.0)
 
-**Current Baseline**: `v0.2.0-alpha.2` (Released 2026-02-18)
+**Current Baseline**: `v0.3.0-alpha.1` (Released 2026-02-19)
 
 ## 1. v0.2.x Stabilization (2-3 weeks)
 *   **Theme**: Trusted Beta Reliability

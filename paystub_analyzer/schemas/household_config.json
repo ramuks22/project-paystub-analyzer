@@ -13,7 +13,7 @@
     "properties": {
         "version": {
             "type": "string",
-            "pattern": "^0\\.2\\.\\d+$"
+            "pattern": "^0\\.3\\.\\d+$"
         },
         "household_id": {
             "type": "string",
@@ -56,10 +56,17 @@
                             },
                             "w2_files": {
                                 "type": "array",
-                                "maxItems": 1,
+                                "minItems": 0,
+                                "maxItems": 20,
                                 "items": {
                                     "type": "string"
-                                }
+                                },
+                                "description": "List of W-2 paths. Aggregated by 'w2_aggregation_mode'."
+                            },
+                            "w2_aggregation_mode": {
+                                "type": "string",
+                                "enum": ["SUM"],
+                                "default": "SUM"
                             }
                         },
                         "additionalProperties": false

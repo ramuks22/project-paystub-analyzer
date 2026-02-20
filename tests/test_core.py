@@ -22,10 +22,10 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(pair.ytd, Decimal("498.26"))
 
     def test_amount_pair_handles_gross_pay_line(self) -> None:
-        line = "Gross Pay $0.00 110,235.05 ."
+        line = "Gross Pay $0.00 50,000.00 ."
         pair = parse_amount_pair_from_line(line)
         self.assertEqual(pair.this_period, Decimal("0.00"))
-        self.assertEqual(pair.ytd, Decimal("110235.05"))
+        self.assertEqual(pair.ytd, Decimal("50000.00"))
 
     def test_filename_pay_date_with_suffix(self) -> None:
         file_path = Path("pay_statements/Pay Date 2025-09-30_01.pdf")
