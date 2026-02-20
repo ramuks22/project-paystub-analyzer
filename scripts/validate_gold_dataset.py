@@ -24,15 +24,23 @@ def validate_gold_dataset(manifest_path: Path):
 
     entries = manifest.get("entries", [])
 
-    # 1. Provider Diversity Check
+    # 1. Provider Diversity Check (Minimum 5 required)
     providers = {e.get("provider") for e in entries if e.get("provider")}
-    print(f"- Providers found: {', '.join(providers)}")
-    if len(providers) < 3:  # We planned 5, but let's check what we have
-        print(f"WARNING: Low provider diversity ({len(providers)}). Expected 3+ (Target 5+).")
+    print(f"- Providers found ({len(providers)}): {', '.join(providers)}")
+    if len(providers) < 5:
+        print(f"ERROR: Provider diversity target not met. Found {len(providers)}, need 5+.")
+        sys.exit(1)
 
     # 2. Coverage Checks
     ids = {e["id"] for e in entries}
-    required_ids = ["adp_standard", "gusto_clean", "trinet_complex", "ocr_challenge"]
+    required_ids = [
+        "adp_standard",
+        "gusto_clean",
+        "trinet_complex",
+        "paychex_classic",
+        "workday_modern",
+        "ocr_challenge",
+    ]
     missing_ids = [rid for rid in required_ids if rid not in ids]
     if missing_ids:
         print(f"ERROR: Missing critical benchmark cases: {missing_ids}")
@@ -40,12 +48,16 @@ def validate_gold_dataset(manifest_path: Path):
     else:
         print("- All critical benchmark cases present.")
 
-    # 3. Integrity Checks
+    # 3. Integrity Checks (SHA-256)
     base_dir = manifest_path.parent
     for entry in entries:
         eid = entry["id"]
-        paystubs_dir = base_dir / entry["inputs"]["paystubs_dir"]
+        expected_hash = entry.get("sha256")
+        if not expected_hash:
+            print(f"ERROR: Entry {eid} missing 'sha256' field in manifest.")
+            sys.exit(1)
 
+        paystubs_dir = base_dir / entry["inputs"]["paystubs_dir"]
         if not paystubs_dir.exists():
             print(f"ERROR: {eid} paystubs directory not found: {paystubs_dir}")
             sys.exit(1)
@@ -55,11 +67,18 @@ def validate_gold_dataset(manifest_path: Path):
             print(f"ERROR: {eid} has no PDF fixtures in {paystubs_dir}")
             sys.exit(1)
 
-        # In a real version, we'd store SHA-256 in manifest or a lockfile
-        # For now, we just ensure they exist.
-        print(f"  [OK] {eid}: {len(files)} files verified.")
+        # Validate each file (assuming 1 file per entry for now, or all must match if multiple)
+        for fpath in files:
+            actual_hash = compute_sha256(fpath)
+            if actual_hash != expected_hash:
+                print(f"ERROR: SHA-256 mismatch for {eid} ({fpath.name})")
+                print(f"  Expected: {expected_hash}")
+                print(f"  Actual:   {actual_hash}")
+                sys.exit(1)
 
-    print("\nSUCCESS: Gold Dataset manifest integrity verified.")
+        print(f"  [OK] {eid}: integrity verified.")
+
+    print("\nSUCCESS: Gold Dataset manifest and fixture integrity verified.")
 
 
 if __name__ == "__main__":

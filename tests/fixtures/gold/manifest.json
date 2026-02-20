@@ -7,6 +7,7 @@
         {
             "id": "smoke_test_2025",
             "provider": "adp",
+            "sha256": "52e2d10be61af0edf60afbf47b09b55e31ea6c4168ce3b16aa63eabe20397c02",
             "description": "Standard ADP single-filer smoke test with 401k and State Tax.",
             "inputs": {
                 "paystubs_dir": "smoke_test_2025/paystubs",
@@ -33,6 +34,7 @@
         {
             "id": "adp_standard",
             "provider": "adp",
+            "sha256": "36e5f0945983da9af4657e0db8064079b7c3ee7db5a898e3c48fa5dc1c54b020",
             "description": "Classic ADP layout, clean extraction target.",
             "inputs": {
                 "paystubs_dir": "adp_standard/paystubs",
@@ -59,6 +61,7 @@
         {
             "id": "gusto_clean",
             "provider": "gusto",
+            "sha256": "34f6e6f995f7ff083d4bf708337ee683118ad26159a323aa99389da315af2a04",
             "description": "Modern Gusto layout, minimalist and large fonts.",
             "inputs": {
                 "paystubs_dir": "gusto_clean/paystubs",
@@ -85,6 +88,7 @@
         {
             "id": "trinet_complex",
             "provider": "trinet",
+            "sha256": "253e4fc548b94b826299870b7ad9d2ade2751430b807c287b745517725cbfe54",
             "description": "Complex TriNet grid layout with subtle noise injection.",
             "inputs": {
                 "paystubs_dir": "trinet_complex/paystubs",
@@ -109,8 +113,63 @@
             }
         },
         {
+            "id": "paychex_classic",
+            "provider": "paychex",
+            "sha256": "c9755b40156196fb5dd7f916609bdc2a418c6895a58a553270278da895488876",
+            "description": "Centered Paychex layout with clear section borders.",
+            "inputs": {
+                "paystubs_dir": "paychex_classic/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
+            "id": "workday_modern",
+            "provider": "workday",
+            "sha256": "c20d7ec494540ba162fff363c09440a479a19befa9fd710201c39d6087aed716",
+            "description": "Workday style payslip with blue header blocks.",
+            "inputs": {
+                "paystubs_dir": "workday_modern/paystubs",
+                "w2_files": []
+            },
+            "settings": {
+                "tax_year": 2025,
+                "render_scale": 2.8,
+                "tolerance": 0.01
+            },
+            "ground_truth": {
+                "household_total_gross_cents": 6000000,
+                "household_total_fed_cents": 960000,
+                "filers": [
+                    {
+                        "id": "primary",
+                        "gross_pay_cents": 6000000,
+                        "fed_tax_cents": 960000,
+                        "expected_anomalies": []
+                    }
+                ]
+            }
+        },
+        {
             "id": "adp_revised",
             "provider": "adp",
+            "sha256": "2ad6119cb8e61b682507377662e57d0ca018b3cf59f486c119b4fdf55c7065e8",
             "description": "Revised ADP stub with one-time period jump but consistent YTD.",
             "inputs": {
                 "paystubs_dir": "adp_revised/paystubs",
@@ -137,6 +196,7 @@
         {
             "id": "ocr_challenge",
             "provider": "adp",
+            "sha256": "b1bb37c12e18c4ab6505c4e30c7db28532bcba3e28e96371d5dfab4fe0143080",
             "description": "Heavy visual noise/artifacts to test OCR extraction resilience.",
             "inputs": {
                 "paystubs_dir": "ocr_challenge/paystubs",

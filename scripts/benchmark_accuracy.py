@@ -82,30 +82,36 @@ def run_benchmark(manifest_path: Path) -> Dict[str, Any]:
             )
             report = composite["report"]
             print("Done.")
+
+            # Score Household Totals
+            actual_gross = report["household_summary"]["total_gross_pay_cents"]
+            actual_fed = report["household_summary"]["total_fed_tax_cents"]
+
+            gt_gross = gt["household_total_gross_cents"]
+            gt_fed = gt["household_total_fed_cents"]
+
+            entry_mismatches = 0
+            if actual_gross != gt_gross:
+                entry_mismatches += 1
+            if actual_fed != gt_fed:
+                entry_mismatches += 1
+
+            total_mismatches += entry_mismatches
+            total_comparison_rows += 2
+
+            results.append(
+                {
+                    "id": entry_id,
+                    "status": "PASS" if entry_mismatches == 0 else "FAIL",
+                    "mismatches": entry_mismatches,
+                    "report_hash": compute_hash(report),
+                }
+            )
         except Exception as e:
             print(f"FAILED: {e}")
-            continue
-
-        # Score Household Totals
-        actual_gross = report["household_summary"]["total_gross_pay_cents"]
-        actual_fed = report["household_summary"]["total_fed_tax_cents"]
-
-        gt_gross = gt["household_total_gross_cents"]
-        gt_fed = gt["household_total_fed_cents"]
-
-        # Each household aggregate counts as a comparison row for mismatch_rate
-        total_comparison_rows += 2
-        if actual_gross != gt_gross:
-            total_mismatches += 1
-        if actual_fed != gt_fed:
-            total_mismatches += 1
-
-        # Score Anomalies (Placeholder for v0.5.0)
-        # In v0.5.0, we will extract anomaly IDs from report and compare to gt["expected_anomalies"]
-
-        results.append(
-            {"id": entry_id, "status": "PASS" if total_mismatches == 0 else "FAIL", "report_hash": compute_hash(report)}
-        )
+            total_mismatches += 2  # Treat processing failure as total mismatch for metrics
+            total_comparison_rows += 2
+            results.append({"id": entry_id, "status": "ERROR", "error": str(e)})
 
     duration = time.time() - start_time
 
@@ -151,3 +157,7 @@ if __name__ == "__main__":
         print(f"Metrics saved to {args.out}")
     else:
         print(json.dumps(metrics, indent=2))
+
+    if metrics["mismatch_rate"] > 0 or any(r["status"] == "ERROR" for r in metrics["results"]):
+        print("\nFATAL: Accuracy benchmark failed or encountered errors.")
+        sys.exit(1)
