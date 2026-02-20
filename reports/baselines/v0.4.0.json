@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-02-20T20:38:08Z",
+  "duration_sec": 0.84,
+  "total_entries": 1,
+  "mismatch_rate": 0.0,
+  "recall_macro": 100.0,
+  "recall_weighted": 100.0,
+  "results": [
+    {
+      "id": "smoke_test_2025",
+      "status": "PASS",
+      "report_hash": "2845547194c31375bd88f860ccf35cfbb682571bb118be72ef1c274d7ff41615"
+    }
+  ]
+}
