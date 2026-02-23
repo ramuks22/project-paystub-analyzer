@@ -68,6 +68,7 @@ def generate_layout_gusto(c: canvas.Canvas, data: Dict[str, Any]):
         ("Federal Income Tax", "fed_tax"),
         ("Social Security", "ss_tax"),
         ("Medicare", "med_tax"),
+        ("401(k) Contribution", "401k"),
     ]
 
     for label, key in ded_fields:
@@ -76,16 +77,22 @@ def generate_layout_gusto(c: canvas.Canvas, data: Dict[str, Any]):
         y -= 15
 
     # Bottom Summary
-    y = 600
+    y = 550
     c.setFont("Helvetica-Bold", 12)
     c.drawString(300, y, "YTD TOTALS")
     c.setFont("Helvetica", 10)
     y -= 20
-    c.drawString(300, y, "YTD Gross")
-    c.drawRightString(450, y, f"{data['ytd'].get('gross_pay', 0.0):,.2f}")
-    y -= 15
-    c.drawString(300, y, "YTD Federal withholding")
-    c.drawRightString(450, y, f"{data['ytd'].get('fed_tax', 0.0):,.2f}")
+    ytd_fields = [
+        ("YTD Gross", "gross_pay"),
+        ("YTD Federal withholding", "fed_tax"),
+        ("YTD Social Security", "ss_tax"),
+        ("YTD Medicare", "med_tax"),
+        ("YTD 401k", "401k"),
+    ]
+    for label, key in ytd_fields:
+        c.drawString(300, y, label)
+        c.drawRightString(450, y, f"{data['ytd'].get(key, 0.0):,.2f}")
+        y -= 15
 
 
 def generate_layout_trinet(c: canvas.Canvas, data: Dict[str, Any]):
@@ -96,20 +103,36 @@ def generate_layout_trinet(c: canvas.Canvas, data: Dict[str, Any]):
     c.drawString(50, 770, f"Advice Number: 999999 | Date: {data['pay_date']}")
 
     # Boxed Layout
-    c.rect(50, 600, 500, 150)
-    c.line(250, 600, 250, 750)
+    c.rect(50, 550, 500, 200)
+    c.line(250, 550, 250, 750)
 
-    # Left: Earnings Grid
+    # Left: Earnings & Period Taxes
     c.drawString(55, 740, "Description")
-    c.drawString(150, 740, "Rate")
-    c.drawString(200, 740, "Total")
+    c.drawString(200, 740, "Value")
     c.drawString(55, 720, "REGULAR")
     c.drawString(200, 720, f"{data['period'].get('gross_pay', 0.0):,.2f}")
+
+    y = 700
+    for label, key in [
+        ("Fed Income Tax", "fed_tax"),
+        ("Soc Sec", "ss_tax"),
+        ("Medicare", "med_tax"),
+        ("401(k)", "401k"),
+    ]:
+        c.drawString(55, y, label)
+        c.drawString(200, y, f"{data['period'].get(key, 0.0):,.2f}")
+        y -= 12
 
     # Right: Taxes & Deductions YTD
     c.drawString(255, 740, "YTD TAXES")
     y = 720
-    for label, key in [("Fed Income Tax", "fed_tax"), ("Soc Sec", "ss_tax"), ("Medicare", "med_tax")]:
+    for label, key in [
+        ("Gross YTD", "gross_pay"),
+        ("Fed Income Tax YTD", "fed_tax"),
+        ("Soc Sec YTD", "ss_tax"),
+        ("Medicare YTD", "med_tax"),
+        ("401(k) YTD", "401k"),
+    ]:
         c.drawString(255, y, label)
         c.drawRightString(450, y, f"{data['ytd'].get(key, 0.0):,.2f}")
         y -= 12
@@ -134,17 +157,24 @@ def generate_layout_paychex(c: canvas.Canvas, data: Dict[str, Any]):
     c.drawString(50, y, "Statutory Taxes")
     c.line(50, y - 5, 550, y - 5)
     y -= 25
-    for label, key in [("Federal Income Tax", "fed_tax"), ("Social Security", "ss_tax")]:
+    for label, key in [("Federal Income Tax", "fed_tax"), ("Social Security", "ss_tax"), ("Medicare", "med_tax")]:
         c.drawString(50, y, label)
         c.drawRightString(500, y, f"{data['period'].get(key, 0.0):,.2f}")
         y -= 15
 
     y -= 40
     c.drawString(50, y, "Year to Date Information")
-    c.line(50, y - 5, 550, y - 5)
+    c.line(50, y - 5, 500, y - 5)
     y -= 25
-    c.drawString(50, y, "Gross Pay")
-    c.drawRightString(500, y, f"{data['ytd'].get('gross_pay', 0.0):,.2f}")
+    for label, key in [
+        ("Gross Pay", "gross_pay"),
+        ("Federal Income Tax", "fed_tax"),
+        ("Social Security", "ss_tax"),
+        ("Medicare", "med_tax"),
+    ]:
+        c.drawString(50, y, label)
+        c.drawRightString(500, y, f"{data['ytd'].get(key, 0.0):,.2f}")
+        y -= 15
 
 
 def generate_layout_workday(c: canvas.Canvas, data: Dict[str, Any]):
@@ -165,9 +195,19 @@ def generate_layout_workday(c: canvas.Canvas, data: Dict[str, Any]):
     c.line(50, y - 5, 550, y - 5)
     y -= 25
     c.setFont("Helvetica", 10)
-    c.drawString(50, y, "Total Gross")
-    c.drawRightString(350, y, f"{data['period'].get('gross_pay', 0.0):,.2f}")
-    c.drawRightString(500, y, f"{data['ytd'].get('gross_pay', 0.0):,.2f}")
+
+    fields = [
+        ("Total Gross", "gross_pay"),
+        ("Federal Tax", "fed_tax"),
+        ("Social Security", "ss_tax"),
+        ("Medicare", "med_tax"),
+    ]
+
+    for label, key in fields:
+        c.drawString(50, y, label)
+        c.drawRightString(350, y, f"{data['period'].get(key, 0.0):,.2f}")
+        c.drawRightString(500, y, f"{data['ytd'].get(key, 0.0):,.2f}")
+        y -= 15
 
 
 def inject_noise(c: canvas.Canvas):
@@ -257,17 +297,47 @@ if __name__ == "__main__":
         root / "workday_modern" / "paystubs" / f"Pay Date {standard_data['iso_date']}.pdf", "workday", standard_data
     )
 
-    # 6. Revised ADP (Different Period data, Same YTD)
-    revised_data = standard_data.copy()
-    revised_data["period"] = {"gross_pay": 6000.0, "fed_tax": 1000.0, "ss_tax": 372.0, "med_tax": 87.0, "401k": 600.0}
+    # 6. Revised ADP (Two files: Stable -> Drop)
+    # File 1: Dec 15
+    data_dec15 = standard_data.copy()
+    data_dec15["pay_date"] = "12/15/2025"
+    data_dec15["iso_date"] = "2025-12-15"
+    data_dec15["ytd"] = {"gross_pay": 55000.0, "fed_tax": 8800.0}
+    generate_fixture(root / "adp_revised" / "paystubs" / f"Pay Date {data_dec15['iso_date']}.pdf", "adp", data_dec15)
+    # File 2: Dec 31 (YTD Drop! 55000 -> 50000)
+    data_dec31 = standard_data.copy()
+    data_dec31["pay_date"] = "12/31/2025"
+    data_dec31["iso_date"] = "2025-12-31"
+    data_dec31["ytd"] = {"gross_pay": 50000.0, "fed_tax": 8000.0}
     generate_fixture(
-        root / "adp_revised" / "paystubs" / f"Pay Date {standard_data['iso_date']}_REV.pdf", "adp", revised_data
+        root / "adp_revised" / "paystubs" / f"Pay Date {data_dec31['iso_date']}_REV.pdf", "adp", data_dec31
     )
 
-    # 7. Generic OCR Challenge (Heavy noise)
+    # 7. Generic OCR Challenge (Sequential Baseline -> Heavy noise + Intentional Mismatch)
+    # File 1: Baseline Dec 15
+    data_baseline = standard_data.copy()
+    data_baseline["pay_date"] = "12/15/2025"
+    data_baseline["iso_date"] = "2025-12-15"
+    data_baseline["ytd"] = {"gross_pay": 55000.0, "fed_tax": 8800.0}
+    generate_fixture(
+        root / "ocr_challenge" / "paystubs" / f"Pay Date {data_baseline['iso_date']}.pdf", "adp", data_baseline
+    )
+
+    # File 2: Noisy Mismatch Dec 31
+    noisy_data = standard_data.copy()
+    noisy_data["ytd"] = noisy_data["ytd"].copy()
+    noisy_data["ytd"]["gross_pay"] = 99999.99  # Mismatch! (55000 + 5000 != 99999)
     generate_fixture(
         root / "ocr_challenge" / "paystubs" / f"Pay Date {standard_data['iso_date']}_NOISY.pdf",
         "adp",
-        standard_data,
+        noisy_data,
         noise=True,
+    )
+
+    # 8. Sequence Gap / Duplicate (Trigger SEQUENCE_GAP)
+    generate_fixture(
+        root / "smoke_test_2025" / "paystubs" / f"Pay Date {standard_data['iso_date']}.pdf", "adp", standard_data
+    )
+    generate_fixture(
+        root / "smoke_test_2025" / "paystubs" / f"Pay Date {standard_data['iso_date']}_DUP.pdf", "adp", standard_data
     )

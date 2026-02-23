@@ -52,8 +52,8 @@ def validate_gold_dataset(manifest_path: Path):
     base_dir = manifest_path.parent
     for entry in entries:
         eid = entry["id"]
-        expected_hash = entry.get("sha256")
-        if not expected_hash:
+        expected_hashes = entry.get("sha256")
+        if not expected_hashes:
             print(f"ERROR: Entry {eid} missing 'sha256' field in manifest.")
             sys.exit(1)
 
@@ -67,9 +67,18 @@ def validate_gold_dataset(manifest_path: Path):
             print(f"ERROR: {eid} has no PDF fixtures in {paystubs_dir}")
             sys.exit(1)
 
-        # Validate each file (assuming 1 file per entry for now, or all must match if multiple)
         for fpath in files:
             actual_hash = compute_sha256(fpath)
+            # Support both dict {filename: hash} and legacy single string
+            if isinstance(expected_hashes, dict):
+                expected_hash = expected_hashes.get(fpath.name)
+                if not expected_hash:
+                    # If file is not in manifest but exists in dir, it's an integrity fail
+                    print(f"ERROR: Unexpected file {fpath.name} in {eid} directory. Not in manifest.")
+                    sys.exit(1)
+            else:
+                expected_hash = expected_hashes
+
             if actual_hash != expected_hash:
                 print(f"ERROR: SHA-256 mismatch for {eid} ({fpath.name})")
                 print(f"  Expected: {expected_hash}")

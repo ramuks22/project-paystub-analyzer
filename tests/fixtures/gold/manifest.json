@@ -7,8 +7,11 @@
         {
             "id": "smoke_test_2025",
             "provider": "adp",
-            "sha256": "52e2d10be61af0edf60afbf47b09b55e31ea6c4168ce3b16aa63eabe20397c02",
-            "description": "Standard ADP single-filer smoke test with 401k and State Tax.",
+            "sha256": {
+                "Pay Date 2025-12-31.pdf": "c89ca5a2aa4f41864f8322700843ce3e3c2a81c52685ea4ce9323d700f047cfa",
+                "Pay Date 2025-12-31_DUP.pdf": "d6c7913e2c826c559c83c9dd801711917111dccb5036c9a3bb0d13e2da3bf2e6"
+            },
+            "description": "Standard ADP single-filer smoke test with a duplicate to trigger SEQUENCE_GAP.",
             "inputs": {
                 "paystubs_dir": "smoke_test_2025/paystubs",
                 "w2_files": []
@@ -26,7 +29,9 @@
                         "id": "primary",
                         "gross_pay_cents": 6000000,
                         "fed_tax_cents": 960000,
-                        "expected_anomalies": []
+                        "expected_anomalies": [
+                            "SEQUENCE_GAP"
+                        ]
                     }
                 ]
             }
@@ -34,7 +39,7 @@
         {
             "id": "adp_standard",
             "provider": "adp",
-            "sha256": "36e5f0945983da9af4657e0db8064079b7c3ee7db5a898e3c48fa5dc1c54b020",
+            "sha256": "2b1500e8215e6ae98b62f59f281f5820b4454517587722d17907cfa2bff4a157",
             "description": "Classic ADP layout, clean extraction target.",
             "inputs": {
                 "paystubs_dir": "adp_standard/paystubs",
@@ -61,7 +66,7 @@
         {
             "id": "gusto_clean",
             "provider": "gusto",
-            "sha256": "34f6e6f995f7ff083d4bf708337ee683118ad26159a323aa99389da315af2a04",
+            "sha256": "475f4ad471c2c6f78458207354afbcb568f4356dd955a4a4bcfac06c3ec00d18",
             "description": "Modern Gusto layout, minimalist and large fonts.",
             "inputs": {
                 "paystubs_dir": "gusto_clean/paystubs",
@@ -88,8 +93,8 @@
         {
             "id": "trinet_complex",
             "provider": "trinet",
-            "sha256": "253e4fc548b94b826299870b7ad9d2ade2751430b807c287b745517725cbfe54",
-            "description": "Complex TriNet grid layout with subtle noise injection.",
+            "sha256": "2614bf3341a80f74e381739b5ef4f2669d445b4a5cc30f474148a1c2a2ef3656",
+            "description": "Complex TriNet grid layout with intentional missing social security YTD.",
             "inputs": {
                 "paystubs_dir": "trinet_complex/paystubs",
                 "w2_files": []
@@ -107,7 +112,9 @@
                         "id": "primary",
                         "gross_pay_cents": 6000000,
                         "fed_tax_cents": 960000,
-                        "expected_anomalies": []
+                        "expected_anomalies": [
+                            "MISMATCH"
+                        ]
                     }
                 ]
             }
@@ -115,8 +122,8 @@
         {
             "id": "paychex_classic",
             "provider": "paychex",
-            "sha256": "c9755b40156196fb5dd7f916609bdc2a418c6895a58a553270278da895488876",
-            "description": "Centered Paychex layout with clear section borders.",
+            "sha256": "163177a3445d6862f20dfd2b11f5693eb5246a7e3ccf3f97d0f47b3c41e5c721",
+            "description": "Centered Paychex layout with intentional missing medicare YTD.",
             "inputs": {
                 "paystubs_dir": "paychex_classic/paystubs",
                 "w2_files": []
@@ -134,7 +141,9 @@
                         "id": "primary",
                         "gross_pay_cents": 6000000,
                         "fed_tax_cents": 960000,
-                        "expected_anomalies": []
+                        "expected_anomalies": [
+                            "MISMATCH"
+                        ]
                     }
                 ]
             }
@@ -142,7 +151,7 @@
         {
             "id": "workday_modern",
             "provider": "workday",
-            "sha256": "c20d7ec494540ba162fff363c09440a479a19befa9fd710201c39d6087aed716",
+            "sha256": "1acf7cd8090f5dcfb8168b4f8535488bd68052fefe0f1574bcdc154fd211d7a9",
             "description": "Workday style payslip with blue header blocks.",
             "inputs": {
                 "paystubs_dir": "workday_modern/paystubs",
@@ -169,8 +178,11 @@
         {
             "id": "adp_revised",
             "provider": "adp",
-            "sha256": "2ad6119cb8e61b682507377662e57d0ca018b3cf59f486c119b4fdf55c7065e8",
-            "description": "Revised ADP stub with one-time period jump but consistent YTD.",
+            "sha256": {
+                "Pay Date 2025-12-15.pdf": "2fb39d075640952856489d02c5a4ffc1e104fe0e2cbf4f8265785e50ed6de9e5",
+                "Pay Date 2025-12-31_REV.pdf": "1a60693be5853939947efdbcb591bac7681a0d709f3772b6222e8e94080d4482"
+            },
+            "description": "Revised ADP sequence with intentional YTD drop.",
             "inputs": {
                 "paystubs_dir": "adp_revised/paystubs",
                 "w2_files": []
@@ -181,14 +193,17 @@
                 "tolerance": 0.01
             },
             "ground_truth": {
-                "household_total_gross_cents": 6000000,
-                "household_total_fed_cents": 960000,
+                "household_total_gross_cents": 5000000,
+                "household_total_fed_cents": 800000,
                 "filers": [
                     {
                         "id": "primary",
-                        "gross_pay_cents": 6000000,
-                        "fed_tax_cents": 960000,
-                        "expected_anomalies": []
+                        "gross_pay_cents": 5000000,
+                        "fed_tax_cents": 800000,
+                        "expected_anomalies": [
+                            "YTD_DROP",
+                            "MISMATCH"
+                        ]
                     }
                 ]
             }
@@ -196,8 +211,11 @@
         {
             "id": "ocr_challenge",
             "provider": "adp",
-            "sha256": "b1bb37c12e18c4ab6505c4e30c7db28532bcba3e28e96371d5dfab4fe0143080",
-            "description": "Heavy visual noise/artifacts to test OCR extraction resilience.",
+            "sha256": {
+                "Pay Date 2025-12-15.pdf": "96d045d51e09fa8e6a880a7055b926e4357d5909296ad71cfa1c1f608b066f0e",
+                "Pay Date 2025-12-31_NOISY.pdf": "a46c4a4d355ec23e47587e2a4ad51623aa8a2b6dfbdd91f1410773b16573ec8c"
+            },
+            "description": "Heavy visual noise/artifacts with intentional YTD calculation mismatch.",
             "inputs": {
                 "paystubs_dir": "ocr_challenge/paystubs",
                 "w2_files": []
@@ -208,14 +226,16 @@
                 "tolerance": 0.01
             },
             "ground_truth": {
-                "household_total_gross_cents": 6000000,
+                "household_total_gross_cents": 9999999,
                 "household_total_fed_cents": 960000,
                 "filers": [
                     {
                         "id": "primary",
-                        "gross_pay_cents": 6000000,
+                        "gross_pay_cents": 9999999,
                         "fed_tax_cents": 960000,
-                        "expected_anomalies": []
+                        "expected_anomalies": [
+                            "CONSISTENCY_ERROR"
+                        ]
                     }
                 ]
             }

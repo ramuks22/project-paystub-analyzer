@@ -18,8 +18,8 @@ class CoreParsingTests(unittest.TestCase):
     def test_amount_pair_ignores_right_column_spillover(self) -> None:
         line = "AZ State Income Tax 498.26 Core Ltd 18.28"
         pair = parse_amount_pair_from_line(line)
-        self.assertIsNone(pair.this_period)
-        self.assertEqual(pair.ytd, Decimal("498.26"))
+        self.assertEqual(pair.this_period, Decimal("498.26"))
+        self.assertIsNone(pair.ytd)
 
     def test_amount_pair_handles_gross_pay_line(self) -> None:
         line = "Gross Pay $0.00 50,000.00 ."

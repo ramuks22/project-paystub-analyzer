@@ -14,7 +14,7 @@ from typing import Callable
 
 import pypdfium2 as pdfium
 
-MONEY_RE = re.compile(r"[+-]?\$?\d[\d,]*\.\d{2}")
+MONEY_RE = re.compile(r"[+-]?(?:\$|S)?\d[\d,\s]*\.\d{2}", re.IGNORECASE)
 FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
 TEXT_PAY_DATE_RE = re.compile(r"Pay Date:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 STATE_TAX_LINE_RE = re.compile(r"\b([A-Z]{2}) State Income Tax\b", re.IGNORECASE)
@@ -26,6 +26,7 @@ class AmountPair:
     this_period: Decimal | None
     ytd: Decimal | None
     source_line: str | None
+    is_ytd_confirmed: bool = False  # Track if context/labels confirmed it as YTD
 
 
 @dataclass
@@ -41,24 +42,56 @@ class PaystubSnapshot:
     normalized_lines: list[str]
 
 
+def heal_numeric_noise(text: str) -> str:
+    """Heal common OCR character swaps and whitespace inside numbers."""
+    # S -> $ when followed by digits
+    text = re.sub(r"\bS(?=\d)", "$", text)
+
+    # O -> 0, I/l -> 1 when surrounded by digits/separators
+    # This is a bit aggressive but often necessary for noisy OCR
+    # We only apply it within segments that look like they should be numeric
+    def swap_chars(match: re.Match[str]) -> str:
+        segment = match.group(0)
+        segment = segment.replace("O", "0").replace("o", "0")
+        segment = segment.replace("I", "1").replace("l", "1")
+        return segment
+
+    # Targeted swap within tokens containing digits
+    text = re.sub(r"[\dOIlo,\.]{3,}", swap_chars, text)
+
+    # Remove internal spaces in suspected money tokens
+    # e.g. "5, 000.00" -> "5,000.00"
+    text = re.sub(r"(\d)\s+([,\.])\s+(\d)", r"\1\2\3", text)
+    # We DO NOT want to aggressively replace comma with dot here because it breaks "5, 000.00" -> "5.000.00"
+    # Only heal spaces after separators
+    text = re.sub(r"(\d)[,\.]\s+(\d)", r"\1\2", text)
+    return text
+
+
 def normalize_line(line: str) -> str:
     line = line.strip()
-    if not line:
-        return ""
-    # Repair OCR splits like "1, 234.56" or "-123 .45".
-    line = re.sub(r"(\d)\s*,\s*(\d)", r"\1,\2", line)
+    line = heal_numeric_noise(line)
     line = re.sub(r"(\d)\s*\.\s*(\d)", r"\1.\2", line)
     line = re.sub(r"(?<!\d)-\s+(\d)", r"-\1", line)
     line = re.sub(r"\s+", " ", line)
     return line
 
 
-def parse_money(token: str) -> Decimal:
-    return Decimal(token.replace("$", "").replace(",", ""))
+def parse_money(token: str) -> Decimal | None:
+    # Clean non-numeric except dot/dash
+    clean = re.sub(r"[^\d\.-]", "", token.replace("S", "$").replace("O", "0"))
+    if not clean or clean == ".":
+        return None
+    try:
+        return Decimal(clean)
+    except Exception:
+        return None
 
 
 def extract_money_values(line: str) -> list[Decimal]:
-    return [parse_money(token) for token in MONEY_RE.findall(line)]
+    tokens = MONEY_RE.findall(line)
+    results = [parse_money(t) for t in tokens]
+    return [r for r in results if r is not None]
 
 
 def parse_amount_pair_from_line(line: str) -> AmountPair:
@@ -66,15 +99,36 @@ def parse_amount_pair_from_line(line: str) -> AmountPair:
     amounts = [abs(value) for value in extract_money_values(normalized)]
     if not amounts:
         return AmountPair(None, None, normalized)
+
+    # Keyword-based disambiguation for single amounts
+    is_ytd_explicit = any(k in normalized.upper() for k in ["YTD", "YEAR TO DATE"])
+    is_period_explicit = any(k in normalized.upper() for k in ["THIS PERIOD", "CURRENT", "REGULAR", "EARNINGS"])
+
     if len(amounts) == 1:
-        return AmountPair(None, amounts[0], normalized)
+        if is_ytd_explicit:
+            return AmountPair(None, amounts[0], normalized)
+        if is_period_explicit:
+            return AmountPair(amounts[0], None, normalized)
+        # Default for single value without keyword: this_period
+        # Caller (find_line_amount_pair) will resolve YTD context.
+        return AmountPair(amounts[0], None, normalized)
 
     first, second = amounts[0], amounts[1]
-    # On standard statements this order is "this period, ytd".
-    # If second is smaller, the second number is often unrelated spillover from the right column.
+    # If the line contains both, usually this period is first.
+    # But check if one is explicitly YTD via proximity?
+    # For now, stick to the relative magnitude heuristic as it's quite reliable for same-line pairs.
     if second >= first:
         return AmountPair(first, second, normalized)
-    return AmountPair(None, first, normalized)
+
+    # If second is smaller, it might be unrelated column data (like in Gusto column collision).
+    # Check if we have explicit markers.
+    if is_ytd_explicit:
+        return AmountPair(None, first, normalized)
+    if is_period_explicit:
+        return AmountPair(first, None, normalized)
+
+    # If no keywords, but second is much smaller, assume it's noise/unrelated.
+    return AmountPair(first, None, normalized)
 
 
 def parse_pay_date_from_filename(path: Path) -> date | None:
@@ -121,12 +175,114 @@ def ocr_first_page(pdf_path: Path, render_scale: float = 2.5, psm: int = 6) -> s
 
 def find_line_amount_pair(lines: list[str], pattern: str) -> AmountPair:
     compiled = re.compile(pattern, re.IGNORECASE)
-    for line in lines:
-        if compiled.search(line):
-            pair = parse_amount_pair_from_line(line)
-            if pair.ytd is not None:
-                return pair
-    return AmountPair(None, None, None)
+    candidates: list[AmountPair] = []
+
+    # All known labels that might collide in a single line
+    # All known labels that might collide in a single line.
+    # We use a flexible boundary to handle non-word characters like ')' in '401(k)'.
+    ALL_LABELS_PAT = r"(?:^|\s|\|)(Gross Pay|YTD Gross|REGULAR|Total Gross|Gross|Federal Income Tax|Fed Income Tax|Federal Tax|Fed Tax|YTD TAXES|withholding|Social Security|Soc Sec|Soc\. Sec\.|Soc See|Soc|Medicare|Med|401\(k\)|401k|Net Pay|Net|Total|Total Due)(?:\s|\||$|:)"
+
+    for i, line in enumerate(lines):
+        line_up = line.upper()
+        # Look for all occurrences of the pattern in the line
+        for match in compiled.finditer(line):
+            matched_label = match.group(0).upper()
+
+            # 1. Detect orientation context
+            # Explicit label markers in the text itself (e.g. "Gross YTD")
+            is_ytd_explicit = any(k in matched_label for k in ["YTD", "TOTAL", "YEAR TO DATE"])
+
+            # 2. Extract context_text but stop if another known label starts
+            remaining = line[match.end() :]
+            start_off = match.start()
+            next_label = re.search(ALL_LABELS_PAT, remaining, re.IGNORECASE)
+            context_text = remaining[: next_label.start()] if next_label else remaining
+
+            # Boundary for right-side context: next label or end of line (max 50 chars)
+            next_start = next_label.start() if next_label else (len(remaining) + 0)
+            right_limit = min(50, next_start)
+
+            # Context only includes text belonging to THIS match
+            local_context = line_up[max(0, start_off - 20) : start_off] + remaining[:right_limit].upper()
+            is_ytd_marker = any(k in local_context for k in ["YTD", "YEAR TO DATE", "TOTAL"])
+
+            # Section header markers (look back 2 lines)
+            lookback = " ".join(lines[max(0, i - 2) : i]).upper()
+            is_ytd_section = any(k in lookback for k in ["YEAR TO DATE", "YTD TOTALS", "YTD TAXES", "YTD INFORMATION"])
+
+            pair = parse_amount_pair_from_line(context_text)
+
+            # 3. Resolve YTD vs Period
+            # Period labels (REGULAR) take precedence over section headers
+            is_period_label = any(k in matched_label for k in ["REGULAR", "PERIOD", "CURRENT", "EARNINGS"])
+            final_is_ytd = is_ytd_explicit or is_ytd_marker or is_ytd_section
+            if is_period_label and not is_ytd_explicit:
+                final_is_ytd = False
+
+            if final_is_ytd and pair.ytd is None and pair.this_period is not None:
+                pair.ytd = pair.this_period
+                pair.this_period = None
+
+            if final_is_ytd:
+                pair.is_ytd_confirmed = True
+
+            candidates.append(pair)
+
+    if not candidates:
+        return AmountPair(None, None, None)
+
+    # 1. Look for a perfect pair in a single line
+    for c in candidates:
+        if c.this_period is not None and c.ytd is not None:
+            return c
+
+    # 2. Aggregate from multiple lines, prioritizing explicit labels
+    best_this_period: Decimal | None = None
+    best_ytd: Decimal | None = None
+    sources: list[str] = []
+
+    # Priority 1: Explicitly labeled period values
+    for c in candidates:
+        source_up = (c.source_line or "").upper()
+        is_period = any(k in source_up for k in ["THIS PERIOD", "CURRENT", "REGULAR", "EARNINGS"])
+        if is_period and c.this_period is not None:
+            best_this_period = c.this_period
+            if c.source_line:
+                sources.append(c.source_line)
+            break
+
+    # Priority 2: Confirmed YTD values (via label, marker, or section)
+    for c in candidates:
+        source_up = (c.source_line or "").upper()
+        if c.is_ytd_confirmed and c.ytd is not None:
+            # Prefer labels that actually CONTAIN 'YTD' over generic markers
+            is_explicit = any(k in source_up for k in ["YTD", "YEAR TO DATE"])
+            if best_ytd is None or (is_explicit and "YTD" not in (sources[0] if sources else "")):
+                best_ytd = c.ytd
+                if c.source_line and c.source_line not in sources:
+                    sources.append(c.source_line)
+            if is_explicit:
+                # Highly confident in explicit YTD label
+                break
+
+    # Priority 3: Fallbacks (First available)
+    if best_this_period is None:
+        for c in candidates:
+            if c.this_period is not None:
+                best_this_period = c.this_period
+                if c.source_line and c.source_line not in sources:
+                    sources.append(c.source_line)
+                break
+
+    if best_ytd is None:
+        for c in candidates:
+            if c.ytd is not None:
+                best_ytd = c.ytd
+                if c.source_line not in sources and c.source_line:
+                    sources.append(c.source_line)
+                break
+
+    return AmountPair(this_period=best_this_period, ytd=best_ytd, source_line=" | ".join(sources) if sources else None)
 
 
 def extract_state_tax_pairs(lines: list[str]) -> dict[str, AmountPair]:
@@ -137,8 +293,17 @@ def extract_state_tax_pairs(lines: list[str]) -> dict[str, AmountPair]:
             continue
         state = match.group(1).upper()
         pair = parse_amount_pair_from_line(line)
-        if pair.ytd is None:
+        # If line has ONLY one value, it might be this_period (common for state taxes in some views)
+        # We accept it if EITHER this_period or ytd is found.
+        if pair.ytd is None and pair.this_period is None:
             continue
+
+        # [P0] Promotion: If ytd is missing but this_period exists, promote it to YTD
+        # to ensure downstream consumers (like LEDGERS) detect the value.
+        if pair.ytd is None and pair.this_period is not None:
+            pair.ytd = pair.this_period
+            # We keep this_period as well, as it's likely both in many layouts
+            # where only one value is shown.
         existing = result.get(state)
         if existing is None:
             result[state] = pair
@@ -167,11 +332,13 @@ def extract_paystub_snapshot(
     return PaystubSnapshot(
         file=str(pdf_path),
         pay_date=pay_date.isoformat() if pay_date else None,
-        gross_pay=find_line_amount_pair(lines, r"\bGross Pay\b"),
-        federal_income_tax=find_line_amount_pair(lines, r"\bFederal Income Tax\b"),
-        social_security_tax=find_line_amount_pair(lines, r"\bSocial Security Tax\b"),
-        medicare_tax=find_line_amount_pair(lines, r"\bMedicare Tax\b"),
-        k401_contrib=find_line_amount_pair(lines, r"\b401\(K\) Contrib\b"),
+        gross_pay=find_line_amount_pair(lines, r"\b(Gross Pay|YTD Gross|REGULAR|Total Gross|Gross)\b"),
+        federal_income_tax=find_line_amount_pair(
+            lines, r"\b(Federal Income Tax|Fed Income Tax|Federal Tax|withholding)\b"
+        ),
+        social_security_tax=find_line_amount_pair(lines, r"\b(Social Security Tax|Soc Sec|Social Security)\b"),
+        medicare_tax=find_line_amount_pair(lines, r"\b(Medicare Tax|Medicare|Med)\b"),
+        k401_contrib=find_line_amount_pair(lines, r"\b(401\(K\) Contrib|401k)\b"),
         state_income_tax=extract_state_tax_pairs(lines),
         normalized_lines=lines,
     )

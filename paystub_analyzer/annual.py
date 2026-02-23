@@ -447,11 +447,12 @@ def check_this_period_consistency(
         if expected < Decimal("0.00"):
             prev_snapshot = snapshot
             continue
+
         if abs(expected - pair.this_period) > tolerance:
             issues.append(
                 ConsistencyIssue(
                     severity="warning",
-                    code="this_period_vs_ytd_delta",
+                    code="ytd_calc_mismatch",
                     message=(
                         f"{pair_name} this-period amount on {snapshot.pay_date} "
                         f"({format_money(pair.this_period)}) differs from YTD delta "
@@ -460,6 +461,49 @@ def check_this_period_consistency(
                 )
             )
         prev_snapshot = snapshot
+    return issues
+
+
+def check_sequence_gaps(snapshots: list[PaystubSnapshot], max_gap_days: int = 20) -> list[ConsistencyIssue]:
+    issues: list[ConsistencyIssue] = []
+    prev_date = None
+    for s in snapshots:
+        if not s.pay_date:
+            continue
+        curr_date = date.fromisoformat(s.pay_date)
+        if prev_date:
+            delta = (curr_date - prev_date).days
+            if delta > max_gap_days:
+                issues.append(
+                    ConsistencyIssue(
+                        severity="warning",
+                        code="SEQUENCE_GAP",
+                        message=f"Gap detected between {prev_date} and {curr_date} ({delta} days).",
+                    )
+                )
+        prev_date = curr_date
+    return issues
+
+
+def check_spike_anomalies(snapshots: list[PaystubSnapshot], multiplier: int = 3) -> list[ConsistencyIssue]:
+    issues: list[ConsistencyIssue] = []
+    amounts: list[Decimal] = []
+    for s in snapshots:
+        val = s.gross_pay.this_period
+        if val is None:
+            continue
+
+        if amounts:
+            avg = sum(amounts) / len(amounts)
+            if val > avg * multiplier and val > Decimal("1000.00"):  # Avoid noise for small amounts
+                issues.append(
+                    ConsistencyIssue(
+                        severity="warning",
+                        code="OUTLIER_EARNINGS",
+                        message=f"Earning spike detected on {s.pay_date}: {format_money(val)} is > {multiplier}x average.",
+                    )
+                )
+        amounts.append(val)
     return issues
 
 
@@ -669,6 +713,10 @@ def run_consistency_checks(
 
     for pair_name in ["federal_tax", "social_security_tax", "medicare_tax"]:
         issues.extend(check_this_period_consistency(canonical, pair_name, tolerance=tolerance))
+
+    # New Cross-Snapshot Continuity Checks
+    issues.extend(check_sequence_gaps(canonical))
+    issues.extend(check_spike_anomalies(canonical))
 
     if canonical:
         final = canonical[-1]
@@ -908,9 +956,12 @@ def analyze_filer(
 
     # Helper to convert decimal/float to cents
     def to_cents(x: dict[str, Any] | None) -> int:
-        # x is now the inner dict like {"ytd": 123.45} from effective_extracted
-        if x and x.get("ytd") is not None:
+        if not x:
+            return 0
+        if x.get("ytd") is not None:
             return int(round(x["ytd"] * 100))
+        if x.get("this_period") is not None:
+            return int(round(x["this_period"] * 100))
         return 0
 
     state_tax_cents = {k: to_cents(v) for k, v in effective_extracted["state_income_tax"].items()}

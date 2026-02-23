@@ -1600,17 +1600,97 @@ def render_workflow_steps(steps: list[dict[str, Any]]) -> None:
 
 def render_step_heading(step_number: int, title: str, subtitle: str) -> None:
     st.markdown(
-        (
-            "<div class='step-heading'>"
-            f"<span class='step-chip'>Step {step_number}</span>"
-            "<div class='step-copy'>"
-            f"<h3>{title}</h3>"
-            f"<p>{subtitle}</p>"
-            "</div>"
-            "</div>"
-        ),
+        f"""
+        <div class="step-heading">
+            <div class="step-chip">Step {step_number}</div>
+            <div class="step-copy">
+                <h3>{title}</h3>
+                <p>{subtitle}</p>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
+
+
+def resolve_household_path(path_value: str, base_dir: Path) -> Path:
+    """Resolve a filer source path relative to the household config base directory."""
+    raw_path = Path(path_value).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+    return (base_dir / raw_path).resolve()
+
+
+def render_anomaly_audit(issues: list[dict[str, Any]], filer_id: str) -> None:
+    if not issues:
+        st.success("✅ No consistency or continuity anomalies detected.")
+        return
+
+    st.markdown("#### 🔍 Consistency Audit")
+    st.caption("Review the following anomalies detected across your payroll history.")
+
+    # Initialize reviewed state if missing
+    if "reviewed_anomalies" not in st.session_state:
+        st.session_state["reviewed_anomalies"] = {}
+    if filer_id not in st.session_state["reviewed_anomalies"]:
+        st.session_state["reviewed_anomalies"][filer_id] = set()
+
+    # Sort: Critical first, then Warning
+    issues = sorted(issues, key=lambda x: 0 if x.get("severity") == "critical" else 1)
+
+    for i, issue in enumerate(issues):
+        severity = issue.get("severity", "warning").lower()
+        code = issue.get("code", "unknown")
+        message = issue.get("message", "")
+        issue_id = f"{code}_{hashlib.md5(message.encode()).hexdigest()[:8]}"
+
+        is_reviewed = issue_id in st.session_state["reviewed_anomalies"][filer_id]
+
+        # Hide from UI if reviewed
+        if is_reviewed:
+            continue
+
+        bg_color = "#fff5f5" if severity == "critical" else "#fffbeb"
+        border_color = "#feb2b2" if severity == "critical" else "#fef3c7"
+        icon = "🚨" if severity == "critical" else "⚠️"
+        label = "CRITICAL" if severity == "critical" else "WARNING"
+
+        st.markdown(
+            f"""
+            <div style="background-color: {bg_color}; border: 1px solid {border_color}; padding: 0.8rem; border-radius: 6px; margin-bottom: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong>{icon} {label}: {code}</strong>
+                    <span style="font-size: 0.8rem; color: #666;">{filer_id}</span>
+                </div>
+                <div style="font-size: 0.9rem; margin-top: 0.3rem;">{message}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        col1, _ = st.columns([1, 2])
+        with col1:
+            if st.checkbox(
+                "Acknowledge / Mark as Reviewed",
+                value=is_reviewed,
+                key=f"review_{filer_id}_{issue_id}_{i}",
+            ):
+                st.session_state["reviewed_anomalies"][filer_id].add(issue_id)
+                st.rerun()  # Refresh to hide immediately
+            else:
+                st.session_state["reviewed_anomalies"][filer_id].discard(issue_id)
+
+    # Summary of reviewed items
+    reviewed_count = len(st.session_state["reviewed_anomalies"][filer_id])
+    if reviewed_count > 0:
+        if reviewed_count == len(issues):
+            st.success(f"✅ All {len(issues)} anomalies have been reviewed.")
+        else:
+            st.info(f"💡 {reviewed_count} issue(s) reviewed and hidden.")
+
+        if st.button("Unhide All Reviewed Anomalies", key=f"unhide_{filer_id}"):
+            st.session_state["reviewed_anomalies"][filer_id] = set()
+            st.rerun()
 
 
 def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
@@ -1743,6 +1823,7 @@ def render_setup_wizard() -> None:
                 try:
                     validate_output(config, "household_config")
                     st.session_state["household_config"] = config
+                    st.session_state["household_config_base_dir"] = str(Path.cwd())
                     st.session_state["setup_valid"] = True
                     st.rerun()
                 except Exception as e:
@@ -1762,6 +1843,7 @@ def render_setup_wizard() -> None:
 
                 if st.button("Use this configuration", type="primary"):
                     st.session_state["household_config"] = cfg
+                    st.session_state["household_config_base_dir"] = str(Path.cwd())
                     st.session_state["setup_valid"] = True
                     st.rerun()
             except Exception as e:
@@ -1788,6 +1870,7 @@ def main() -> None:
         st.stop()
 
     household_config = st.session_state["household_config"]
+    config_base_dir = Path(str(st.session_state.get("household_config_base_dir", Path.cwd()))).expanduser()
     year = int(household_config.get("filing_year", 2025))
 
     with st.sidebar:
@@ -1824,7 +1907,7 @@ def main() -> None:
     active_filer_id = st.session_state["active_filer_id"]
     active_filer_cfg = next((f for f in household_config["filers"] if f["id"] == active_filer_id), None)
     paystubs_dir_str = active_filer_cfg["sources"]["paystubs_dir"] if active_filer_cfg else "pay_statements"
-    paystubs_dir = Path(paystubs_dir_str)
+    paystubs_dir = resolve_household_path(paystubs_dir_str, config_base_dir)
 
     files = list_paystub_files(paystubs_dir, int(year))
     if not files:
@@ -1841,20 +1924,57 @@ def main() -> None:
     step3_complete = prior_packet is not None
 
     step2_needs_review = False
+
+    # 1. Check for W-2 comparison mismatches
     if isinstance(prior_w2_validation, dict):
         summary = cast(dict[str, Any], prior_w2_validation.get("comparison_summary", {}))
         step2_needs_review = summary.get("mismatch", 0) > 0 or summary.get("review_needed", 0) > 0
+
+    # 2. Check for unreviewed critical extraction anomalies
+    # This ensures that even without W-2, critical errors in extraction block Step 3
+    reviewed = st.session_state.get("reviewed_anomalies", {})
+    annual_preview = st.session_state.get("annual_summary_preview")
+    if isinstance(annual_preview, dict):
+        for filer in annual_preview.get("filers_analysis", []):
+            f_id = filer["public"]["id"]
+            f_reviewed = reviewed.get(f_id, set())
+            f_issues = filer["internal"]["meta"].get("consistency_issues", [])
+            for issue in f_issues:
+                if issue.get("severity") == "critical":
+                    message = issue.get("message", "")
+                    code = issue.get("code", "unknown")
+                    issue_id = f"{code}_{hashlib.md5(message.encode()).hexdigest()[:8]}"
+                    if issue_id not in f_reviewed:
+                        step2_needs_review = True
+                        break
+
     step2_marked_completed = step2_complete and not step2_needs_review
 
     step3_needs_review = False
     if isinstance(prior_packet, dict):
         packet_summary = cast(dict[str, Any], prior_packet)
-        critical_count = sum(
-            1
-            for issue in packet_summary.get("consistency_issues", [])
-            if isinstance(issue, dict) and issue.get("severity") == "critical"
-        )
+        # Check both the packet's own issue list AND ensure no new unreviewed issues appeared
+        all_issues = packet_summary.get("consistency_issues", [])
+        if not all_issues and "filers" in packet_summary:
+            # Household aggregation might have them nested
+            for f in packet_summary["filers"]:
+                all_issues.extend(f.get("consistency_issues", []))
+
+        critical_count = 0
+        for issue in all_issues:
+            if isinstance(issue, dict) and issue.get("severity") == "critical":
+                # Check if this specific issue was reviewed
+                # (Ideally we'd have a stable ID here too, but for now we trust Step 2 review state)
+                # Actually, Step 3 should just check if any criticals exist that aren't 'Reviewed' in session state.
+                critical_count += 1
+
         step3_needs_review = critical_count > 0 or not bool(packet_summary.get("ready_to_file"))
+
+        # Override step3_needs_review if everything critical is reviewed
+        if critical_count > 0:
+            # We already checked for unreviewed criticals in step2_needs_review logic above.
+            # If step2_needs_review is True due to anomalies, Step 3 will be naturally discouraged.
+            pass
 
     if not step1_complete:
         active_step = 1
@@ -1953,8 +2073,10 @@ def main() -> None:
                         if household_mode and household_config:
                             # Define loaders for household orchestrator
                             def ui_snapshot_loader(src_config: dict[str, Any]) -> list[PaystubSnapshot]:
-                                sub_dir = Path(src_config.get("paystubs_dir", "."))
-                                full_path = sub_dir if sub_dir.is_absolute() else paystubs_dir / sub_dir
+                                full_path = resolve_household_path(
+                                    str(src_config.get("paystubs_dir", ".")),
+                                    config_base_dir,
+                                )
                                 return collect_annual_snapshots(
                                     paystubs_dir=full_path,
                                     year=int(year),
@@ -2190,8 +2312,11 @@ def main() -> None:
                 st.markdown(f"### Whole-Year Summary: {public['id'].title()} ({public['role']})")
 
                 # Corrections UI
-                with st.expander("Values Verification & Corrections"):
-                    st.info("Overrides applied here will be reflected in the final filing package.")
+                with st.expander("Values Verification & Corrections", expanded=True):
+                    # Surface Anomalies First
+                    render_anomaly_audit(meta.get("consistency_issues", []), active_filer_id)
+                    st.markdown("---")
+                    st.info("Overrides applied below will be reflected in the final filing package.")
 
                     existing_corrections = st.session_state.get("corrections", {}).get(active_filer_id, {})
                     editor_rows = []
@@ -2203,8 +2328,6 @@ def main() -> None:
                                 "Reason": v.get("audit_reason", "Manual UI Override"),
                             }
                         )
-
-                    import pandas as pd
 
                     df_corrections = pd.DataFrame(editor_rows, columns=["Field", "Value", "Reason"])
                     if df_corrections.empty:
@@ -2394,8 +2517,6 @@ def main() -> None:
                                     "Timestamp": str(t.get("timestamp"))[:19].replace("T", " "),
                                 }
                             )
-                        import pandas as pd
-
                         t_df = pd.DataFrame(trace_data)
                         st.dataframe(
                             t_df.style.set_properties(**{"background-color": "#fffbea"}),
@@ -2594,7 +2715,7 @@ def main() -> None:
             household_cfg = st.session_state["household_config"]
 
             def packet_snapshot_loader(source_cfg: dict[str, Any]) -> list[PaystubSnapshot]:
-                p_dir = Path(source_cfg["paystubs_dir"])
+                p_dir = resolve_household_path(str(source_cfg["paystubs_dir"]), config_base_dir)
                 return collect_annual_snapshots(
                     paystubs_dir=p_dir,
                     year=int(year),
@@ -2615,7 +2736,7 @@ def main() -> None:
                 if w2_files:
                     from paystub_analyzer.w2_aggregator import load_and_aggregate_w2s
 
-                    return load_and_aggregate_w2s(w2_files, Path.cwd(), int(year), render_scale)
+                    return load_and_aggregate_w2s(w2_files, config_base_dir, int(year), render_scale)
                 return None
 
             corrections_payload = st.session_state.get("corrections", {})
