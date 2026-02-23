@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0-beta.1] - 2026-02-23
+
+### Added
+- **Gold Dataset Benchmark Harness**: Added `scripts/benchmark_accuracy.py` to compute mismatch rate, anomaly recall, and reproducibility hashes against `tests/fixtures/gold/manifest.json`.
+- **Synthetic Fixture Expansion**: Added multi-provider gold fixtures and dataset governance assets (`tests/fixtures/gold/PROVENANCE.md`, integrity validation tooling).
+- **Continuity Test Coverage**: Added `tests/test_continuity_engine.py` for YTD continuity, sequence gap, and outlier anomaly checks.
+
+### Changed
+- **Extraction Hardening**: Expanded OCR normalization, label-aware parsing, and cross-snapshot continuity checks in core annual extraction paths.
+- **UI Workflow Resilience**: Improved household path resolution and anomaly review handling in the Streamlit flow.
+
+### Fixed
+- **[P0] State Tax YTD Promotion**: Single-value state-tax lines now promote to YTD so ledger totals and W-2 state comparisons do not drop valid values.
+- **[P0] Numeric Healing Regression**: Restored safe thousands-separator healing (`5, 000.00` now normalizes/parses to `5000.00`).
+- **[P1] Benchmark Recall Denominator**: Expected anomaly labels are counted even when processing fails, preventing inflated recall metrics.
+- **[P1] Reproducibility Determinism**: Sorted anomaly arrays and normalized variable fields during reproducibility checks for bit-identical normalized benchmark outputs.
+
 ## [0.4.0] - 2026-02-20
 
 ### Added
