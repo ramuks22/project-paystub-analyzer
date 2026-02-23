@@ -175,3 +175,22 @@ jobs:
         with:
           name: benchmark-results
           path: reports/ci_smoke_metrics.json
+
+  compliance:
+    name: Compliance
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - docker-hardening
+      - accuracy-benchmark
+    if: always()
+    steps:
+      - name: Enforce required CI jobs
+        run: |
+          echo "test=${{ needs.test.result }}"
+          echo "docker-hardening=${{ needs['docker-hardening'].result }}"
+          echo "accuracy-benchmark=${{ needs['accuracy-benchmark'].result }}"
+
+          [ "${{ needs.test.result }}" = "success" ] || exit 1
+          [ "${{ needs['docker-hardening'].result }}" = "success" ] || exit 1
+          [ "${{ needs['accuracy-benchmark'].result }}" = "success" ] || exit 1
