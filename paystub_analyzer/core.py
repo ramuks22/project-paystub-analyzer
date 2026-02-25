@@ -84,6 +84,9 @@ def heal_numeric_noise(text: str) -> str:
 def normalize_line(line: str) -> str:
     line = line.strip()
     line = heal_numeric_noise(line)
+    # Heal split cents OCR pattern in tax rows:
+    # e.g. "-60 53 1,138.83" -> "-60.53 1,138.83"
+    line = re.sub(r"(?<!\d)(-?\d{1,3})\s+(\d{2})(?=\s+\d{1,3},\d{3}\.\d{2}\b)", r"\1.\2", line)
     line = re.sub(r"(\d)\s*\.\s*(\d)", r"\1.\2", line)
     line = re.sub(r"(?<!\d)-\s+(\d)", r"-\1", line)
     line = re.sub(r"\s+", " ", line)
@@ -390,13 +393,13 @@ def extract_ukg_pay_summary_gross_pair(lines: list[str]) -> AmountPair:
 
     for line in lines[pay_summary_index + 1 : pay_summary_index + 12]:
         upper = line.upper()
-        if upper.startswith("CURRENT"):
+        if re.search(r"\bCURRENT\b", upper):
             amounts = [abs(value) for value in extract_money_values(line)]
             if amounts:
                 current = amounts[0]
                 sources.append(line)
             continue
-        if upper.startswith("YTD"):
+        if re.search(r"\bYTD\b", upper):
             amounts = [abs(value) for value in extract_money_values(line)]
             if amounts:
                 ytd = amounts[0]
@@ -442,12 +445,31 @@ def extract_regular_wages_pair(lines: list[str]) -> AmountPair:
 
 
 def extract_adp_gross_line_pair(lines: list[str]) -> AmountPair:
+    def parse_zero_like_current_token(line: str) -> Decimal | None:
+        marker = re.search(r"\bGross Pay\b\s+([^\s]+)", line, re.IGNORECASE)
+        if marker is None:
+            return None
+        token = marker.group(1).strip()
+        if re.fullmatch(r"[S\$]?(?:0|00|80|B0|O0|8O|BO)[\.,]00", token, re.IGNORECASE):
+            return Decimal("0.00")
+        if re.fullmatch(r"[S\$]?0[\.,]00", token, re.IGNORECASE):
+            return Decimal("0.00")
+        return None
+
     for line in lines:
         if re.search(r"\bGross Pay\b", line, re.IGNORECASE) is None:
             continue
 
+        zero_like_current = parse_zero_like_current_token(line)
         amounts = [abs(value) for value in extract_money_values(line)]
+        if zero_like_current is not None and amounts:
+            ytd_candidate = max(amounts)
+            if ytd_candidate >= Decimal("1000.00"):
+                return AmountPair(zero_like_current, ytd_candidate, line, is_ytd_confirmed=True)
+
         if len(amounts) < 2:
+            if zero_like_current is not None and len(amounts) == 1:
+                return AmountPair(zero_like_current, amounts[0], line, is_ytd_confirmed=True)
             continue
 
         first = amounts[0]
@@ -464,12 +486,20 @@ def extract_adp_gross_line_pair(lines: list[str]) -> AmountPair:
 
 
 def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
+    regular_wages = extract_regular_wages_pair(lines)
     ukg_pay_summary = extract_ukg_pay_summary_gross_pair(lines)
     if ukg_pay_summary.this_period is not None or ukg_pay_summary.ytd is not None:
+        if ukg_pay_summary.this_period is None and regular_wages.this_period is not None:
+            merged_source_parts = [part for part in [ukg_pay_summary.source_line, regular_wages.source_line] if part]
+            return AmountPair(
+                this_period=regular_wages.this_period,
+                ytd=ukg_pay_summary.ytd,
+                source_line=" | ".join(dict.fromkeys(merged_source_parts)),
+                is_ytd_confirmed=ukg_pay_summary.ytd is not None,
+            )
         return ukg_pay_summary
 
     adp_gross_line = extract_adp_gross_line_pair(lines)
-    regular_wages = extract_regular_wages_pair(lines)
     if adp_gross_line.ytd is not None:
         this_candidate = adp_gross_line.this_period
         if (
@@ -495,6 +525,8 @@ def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
         return strict
 
     if strict.this_period is None and strict.ytd is None:
+        if regular_wages.this_period is not None or regular_wages.ytd is not None:
+            return regular_wages
         return regular
 
     # OCR can drop punctuation in this-period on "Gross Pay" lines and leave a single
@@ -515,6 +547,22 @@ def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
             )
 
     return strict
+
+
+def _promote_single_value_to_ytd_on_zero_gross(pair: AmountPair) -> AmountPair:
+    if pair.ytd is not None or pair.this_period is None:
+        return pair
+    if pair.this_period <= Decimal("0.00"):
+        return pair
+    source_line = pair.source_line or ""
+    if re.search(r"-\s*\d", source_line):
+        return pair
+    return AmountPair(
+        this_period=None,
+        ytd=pair.this_period,
+        source_line=pair.source_line,
+        is_ytd_confirmed=True,
+    )
 
 
 def extract_paystub_snapshot(
@@ -549,6 +597,21 @@ def extract_paystub_snapshot(
     if pay_date is None:
         pay_date = parse_pay_date_from_filename(pdf_path)
     gross_pair = extract_gross_pay_pair(lines)
+    federal_pair = find_line_amount_pair(lines, r"\b(Federal Income Tax|Fed Income Tax|Federal Tax|withholding)\b")
+    social_security_pair = find_line_amount_pair(lines, r"\b(Social Security Tax|Soc Sec|Social Security)\b")
+    medicare_pair = find_line_amount_pair(lines, r"\b(Medicare Tax|Medicare|Med)\b")
+    k401_pair = find_line_amount_pair(lines, r"\b(401\(K\) Contrib|401k)\b")
+    state_pairs = extract_state_tax_pairs(lines)
+
+    if (
+        gross_pair.this_period is not None
+        and abs(gross_pair.this_period) <= Decimal("0.01")
+        and gross_pair.ytd is not None
+    ):
+        federal_pair = _promote_single_value_to_ytd_on_zero_gross(federal_pair)
+        social_security_pair = _promote_single_value_to_ytd_on_zero_gross(social_security_pair)
+        medicare_pair = _promote_single_value_to_ytd_on_zero_gross(medicare_pair)
+        state_pairs = {state: _promote_single_value_to_ytd_on_zero_gross(pair) for state, pair in state_pairs.items()}
 
     source_line = gross_pair.source_line or ""
     source_upper = source_line.upper()
@@ -577,13 +640,11 @@ def extract_paystub_snapshot(
         file=str(pdf_path),
         pay_date=pay_date.isoformat() if pay_date else None,
         gross_pay=gross_pair,
-        federal_income_tax=find_line_amount_pair(
-            lines, r"\b(Federal Income Tax|Fed Income Tax|Federal Tax|withholding)\b"
-        ),
-        social_security_tax=find_line_amount_pair(lines, r"\b(Social Security Tax|Soc Sec|Social Security)\b"),
-        medicare_tax=find_line_amount_pair(lines, r"\b(Medicare Tax|Medicare|Med)\b"),
-        k401_contrib=find_line_amount_pair(lines, r"\b(401\(K\) Contrib|401k)\b"),
-        state_income_tax=extract_state_tax_pairs(lines),
+        federal_income_tax=federal_pair,
+        social_security_tax=social_security_pair,
+        medicare_tax=medicare_pair,
+        k401_contrib=k401_pair,
+        state_income_tax=state_pairs,
         normalized_lines=lines,
         parse_anomalies=parse_anomalies,
     )

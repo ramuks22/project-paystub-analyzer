@@ -10,6 +10,7 @@ from paystub_analyzer.core import (
     extract_money_values_with_anomalies,
     extract_state_tax_pairs,
     list_paystub_files,
+    normalize_line,
     parse_amount_pair_from_line,
     parse_pay_date_from_filename,
     parse_pay_date_from_text,
@@ -160,6 +161,11 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(anomaly["field_guess"], "federal_income_tax")
         self.assertEqual(anomaly["line_index"], "2")
 
+    def test_normalize_line_heals_split_cents_before_ytd_value(self) -> None:
+        line = "VA State Income Tax -60 53 1,138.83"
+        normalized = normalize_line(line)
+        self.assertIn("-60.53", normalized)
+
     def test_ukg_pay_summary_gross_precedence(self) -> None:
         text = "\n".join(
             [
@@ -209,6 +215,75 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(snapshot.pay_date, "2025-08-22")
         self.assertEqual(snapshot.gross_pay.this_period, Decimal("1504.71"))
         self.assertEqual(snapshot.gross_pay.ytd, Decimal("27788.98"))
+
+    def test_adp_regular_line_with_hours_prefers_wage_pair_for_gross(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/05/2025",
+                "Regular 23.5000 72.00 1,692.00 24,581.41",
+                "Federal Income Tax -120.36 1,754.67",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-05.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1692.00"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("24581.41"))
+
+    def test_zero_gross_promotes_single_value_tax_and_state_to_ytd(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/15/2025",
+                "Gross Pay $0.00 29,711.51",
+                "Federal Income Tax 1,754.67",
+                "Social Security Tax 1,842.11",
+                "Medicare Tax 430.82",
+                "VA State Income Tax 920.39",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-15.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertIsNone(snapshot.federal_income_tax.this_period)
+        self.assertEqual(snapshot.federal_income_tax.ytd, Decimal("1754.67"))
+        self.assertIsNone(snapshot.social_security_tax.this_period)
+        self.assertEqual(snapshot.social_security_tax.ytd, Decimal("1842.11"))
+        self.assertIsNone(snapshot.medicare_tax.this_period)
+        self.assertEqual(snapshot.medicare_tax.ytd, Decimal("430.82"))
+        self.assertIsNone(snapshot.state_income_tax["VA"].this_period)
+        self.assertEqual(snapshot.state_income_tax["VA"].ytd, Decimal("920.39"))
+
+    def test_ukg_pay_summary_keeps_ytd_missing_when_summary_ytd_missing(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date 02/21/2025",
+                "Regular Earning 64.000000 $1,563.13 $6,125.96",
+                "Pay Summary",
+                "Current $1,563.13 $1,344.95 $249.15 $222.90 $1,091.08",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/EEPayrollPayCheckDetail_02212025.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1563.13"))
+        self.assertIsNone(snapshot.gross_pay.ytd)
+
+    def test_adp_gross_single_value_with_zero_like_token_sets_this_period_zero(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/15/2025",
+                "Gross Pay 80,00 29,711.51 401K Er Basic 888.49",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-15.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("0.00"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("29711.51"))
 
 
 if __name__ == "__main__":
