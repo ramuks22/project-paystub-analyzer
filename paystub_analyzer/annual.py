@@ -12,6 +12,7 @@ from paystub_analyzer.core import (
     AmountPair,
     PaystubSnapshot,
     as_float,
+    extract_money_values,
     extract_paystub_snapshot,
     format_money,
     list_paystub_files,
@@ -31,6 +32,11 @@ class ConsistencyIssue:
     severity: str
     code: str
     message: str
+    evidence: str | None = None
+    field_name: str | None = None
+    old_interpretation: str | None = None
+    new_interpretation: str | None = None
+    reason: str | None = None
 
 
 def parse_iso_date(value: str | None) -> date | None:
@@ -64,7 +70,7 @@ def clone_snapshots(snapshots: list[PaystubSnapshot]) -> list[PaystubSnapshot]:
     cloned: list[PaystubSnapshot] = []
     for snapshot in snapshots:
         state_copy = {
-            state: AmountPair(pair.this_period, pair.ytd, pair.source_line)
+            state: AmountPair(pair.this_period, pair.ytd, pair.source_line, pair.is_ytd_confirmed)
             for state, pair in snapshot.state_income_tax.items()
         }
         cloned.append(
@@ -78,9 +84,186 @@ def clone_snapshots(snapshots: list[PaystubSnapshot]) -> list[PaystubSnapshot]:
                 k401_contrib=snapshot.k401_contrib,
                 state_income_tax=state_copy,
                 normalized_lines=list(snapshot.normalized_lines),
+                parse_anomalies=list(snapshot.parse_anomalies),
             )
         )
     return cloned
+
+
+def collect_parse_anomaly_issues(snapshots: list[PaystubSnapshot]) -> list[ConsistencyIssue]:
+    issues: list[ConsistencyIssue] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for snapshot in snapshots:
+        for anomaly in snapshot.parse_anomalies:
+            code = str(anomaly.get("code", "parse_anomaly"))
+            severity = str(anomaly.get("severity", "warning"))
+            message = str(anomaly.get("message", "Parser anomaly detected."))
+            evidence = str(anomaly.get("evidence", ""))
+            dedupe_key = (snapshot.file, code, message, evidence)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            target = snapshot.pay_date or snapshot.file
+            issues.append(
+                ConsistencyIssue(
+                    severity=severity,
+                    code=code,
+                    message=f"{message} ({target})",
+                    evidence=evidence or None,
+                    field_name=str(anomaly.get("field_guess", "")) or None,
+                    reason="parse_guard",
+                )
+            )
+    return issues
+
+
+def _pair_for_field(snapshot: PaystubSnapshot, field_name: str, state: str | None = None) -> AmountPair | None:
+    if field_name == "gross_pay":
+        return snapshot.gross_pay
+    if field_name == "federal_income_tax":
+        return snapshot.federal_income_tax
+    if field_name == "social_security_tax":
+        return snapshot.social_security_tax
+    if field_name == "medicare_tax":
+        return snapshot.medicare_tax
+    if field_name == "state_income_tax" and state is not None:
+        return snapshot.state_income_tax.get(state)
+    return None
+
+
+def _set_pair_for_field(
+    snapshot: PaystubSnapshot,
+    field_name: str,
+    pair: AmountPair,
+    state: str | None = None,
+) -> None:
+    if field_name == "gross_pay":
+        snapshot.gross_pay = pair
+        return
+    if field_name == "federal_income_tax":
+        snapshot.federal_income_tax = pair
+        return
+    if field_name == "social_security_tax":
+        snapshot.social_security_tax = pair
+        return
+    if field_name == "medicare_tax":
+        snapshot.medicare_tax = pair
+        return
+    if field_name == "state_income_tax" and state is not None:
+        snapshot.state_income_tax[state] = pair
+        return
+    raise ValueError(f"Unsupported promotion field: {field_name}")
+
+
+def promote_ytd_candidates(
+    snapshots: list[PaystubSnapshot],
+    tolerance: Decimal,
+) -> tuple[list[PaystubSnapshot], list[ConsistencyIssue]]:
+    if not snapshots:
+        return [], []
+
+    promoted = clone_snapshots(snapshots)
+    issues: list[ConsistencyIssue] = []
+
+    for index, snapshot in enumerate(promoted):
+        gross_this_period = snapshot.gross_pay.this_period
+        if gross_this_period is None or abs(gross_this_period) > tolerance:
+            continue
+
+        field_targets: list[tuple[str, str | None]] = [
+            ("gross_pay", None),
+            ("federal_income_tax", None),
+            ("social_security_tax", None),
+            ("medicare_tax", None),
+        ]
+        for state_code in sorted(snapshot.state_income_tax.keys()):
+            field_targets.append(("state_income_tax", state_code))
+
+        for field_name, target_state in field_targets:
+            pair = _pair_for_field(snapshot, field_name, target_state)
+            if pair is None or pair.this_period is None or pair.ytd is not None:
+                continue
+            candidate = pair.this_period
+            if candidate <= Decimal("0.00"):
+                continue
+
+            prev_ytd: Decimal | None = None
+            next_ytd: Decimal | None = None
+            for prev_idx in range(index - 1, -1, -1):
+                prev_pair = _pair_for_field(promoted[prev_idx], field_name, target_state)
+                if prev_pair is not None and prev_pair.ytd is not None:
+                    prev_ytd = prev_pair.ytd
+                    break
+            for next_idx in range(index + 1, len(promoted)):
+                next_pair = _pair_for_field(promoted[next_idx], field_name, target_state)
+                if next_pair is not None and next_pair.ytd is not None:
+                    next_ytd = next_pair.ytd
+                    break
+
+            field_label = field_name if target_state is None else f"state_income_tax_{target_state}"
+            target = snapshot.pay_date or snapshot.file
+
+            if prev_ytd is None and next_ytd is None:
+                issues.append(
+                    ConsistencyIssue(
+                        severity="warning",
+                        code="zero_period_ytd_promotion_rejected",
+                        message=(
+                            f"Skipped YTD promotion for {field_label} on {target}: no neighboring YTD values available."
+                        ),
+                        evidence=pair.source_line,
+                        field_name=field_label,
+                        old_interpretation=f"this_period={format_money(candidate)}, ytd=n/a",
+                        new_interpretation="unchanged",
+                        reason="missing_neighbors",
+                    )
+                )
+                continue
+
+            monotonic_prev_ok = prev_ytd is None or candidate + tolerance >= prev_ytd
+            monotonic_next_ok = next_ytd is None or candidate - tolerance <= next_ytd
+            if not (monotonic_prev_ok and monotonic_next_ok):
+                issues.append(
+                    ConsistencyIssue(
+                        severity="warning",
+                        code="zero_period_ytd_promotion_rejected",
+                        message=(
+                            f"Skipped YTD promotion for {field_label} on {target}: "
+                            "candidate value is not monotonic with neighbors."
+                        ),
+                        evidence=pair.source_line,
+                        field_name=field_label,
+                        old_interpretation=f"this_period={format_money(candidate)}, ytd=n/a",
+                        new_interpretation="unchanged",
+                        reason="non_monotonic",
+                    )
+                )
+                continue
+
+            promoted_pair = AmountPair(
+                this_period=None,
+                ytd=candidate,
+                source_line=pair.source_line,
+                is_ytd_confirmed=True,
+            )
+            _set_pair_for_field(snapshot, field_name, promoted_pair, target_state)
+            issues.append(
+                ConsistencyIssue(
+                    severity="warning",
+                    code="zero_period_ytd_promoted",
+                    message=(
+                        f"Promoted {field_label} on {target} from this-period value "
+                        f"{format_money(candidate)} to YTD because gross pay this period is $0.00."
+                    ),
+                    evidence=pair.source_line,
+                    field_name=field_label,
+                    old_interpretation=f"this_period={format_money(candidate)}, ytd=n/a",
+                    new_interpretation=f"this_period=n/a, ytd={format_money(candidate)}",
+                    reason="gross_pay_zero_and_monotonic_neighbors",
+                )
+            )
+
+    return promoted, issues
 
 
 def verify_and_repair_state_ytd_anomalies(
@@ -220,6 +403,149 @@ def verify_and_repair_state_ytd_anomalies(
             notes_by_file.setdefault(snapshot.file, []).append(
                 f"{state}: {format_money(current_ytd)} -> {format_money(corrected_ytd)}"
             )
+
+    return repaired, issues, notes_by_file
+
+
+def verify_and_repair_gross_ytd_anomalies(
+    snapshots: list[PaystubSnapshot],
+    tolerance: Decimal,
+) -> tuple[list[PaystubSnapshot], list[ConsistencyIssue], dict[str, list[str]]]:
+    if not snapshots:
+        return snapshots, [], {}
+
+    repaired = clone_snapshots(snapshots)
+    issues: list[ConsistencyIssue] = []
+    notes_by_file: dict[str, list[str]] = {}
+
+    for idx, snapshot in enumerate(repaired):
+        pair = snapshot.gross_pay
+        prev_ytd: Decimal | None = None
+        next_ytd: Decimal | None = None
+
+        for prev_idx in range(idx - 1, -1, -1):
+            prev_pair = repaired[prev_idx].gross_pay
+            if prev_pair.ytd is not None:
+                prev_ytd = prev_pair.ytd
+                break
+        for next_idx in range(idx + 1, len(repaired)):
+            next_pair = repaired[next_idx].gross_pay
+            if next_pair.ytd is not None:
+                next_ytd = next_pair.ytd
+                break
+
+        expected_delta: Decimal | None = None
+        if pair.ytd is not None and prev_ytd is not None:
+            expected_delta = (pair.ytd - prev_ytd).quantize(Decimal("0.01"))
+
+        # If YTD is stable/valid but this-period appears to be OCR-swapped with a large
+        # cumulative value, repair this-period from continuity delta directly.
+        if expected_delta is not None and expected_delta >= Decimal("0.00") and pair.this_period is not None:
+            ytd_value = pair.ytd
+            if ytd_value is None:
+                continue
+            this_period_diff = abs(pair.this_period - expected_delta)
+            large_delta_gap = this_period_diff > max(Decimal("10.00"), tolerance)
+            looks_swapped = pair.this_period > ytd_value or pair.this_period > (expected_delta * Decimal("3.0"))
+            if large_delta_gap and looks_swapped:
+                corrected_this_period = expected_delta
+                snapshot.gross_pay = AmountPair(
+                    this_period=corrected_this_period,
+                    ytd=ytd_value,
+                    source_line=pair.source_line,
+                    is_ytd_confirmed=pair.is_ytd_confirmed,
+                )
+                target = snapshot.pay_date or snapshot.file
+                issues.append(
+                    ConsistencyIssue(
+                        severity="warning",
+                        code="gross_this_period_repaired",
+                        message=(
+                            f"Gross pay this-period on {target} was auto-corrected from "
+                            f"{format_money(pair.this_period)} to {format_money(corrected_this_period)} "
+                            "using YTD continuity."
+                        ),
+                        evidence=pair.source_line,
+                        field_name="gross_pay",
+                        old_interpretation=(
+                            f"this_period={format_money(pair.this_period)}, ytd={format_money(pair.ytd)}"
+                        ),
+                        new_interpretation=(
+                            f"this_period={format_money(corrected_this_period)}, ytd={format_money(pair.ytd)}"
+                        ),
+                        reason="gross_delta_continuity_repair",
+                    )
+                )
+                notes_by_file.setdefault(snapshot.file, []).append(
+                    f"gross_pay_this_period: {format_money(pair.this_period)} -> {format_money(corrected_this_period)}"
+                )
+                continue
+
+        needs_repair = False
+        if pair.ytd is None:
+            if pair.this_period is not None and prev_ytd is not None and pair.this_period + tolerance < prev_ytd:
+                needs_repair = True
+            if pair.this_period is not None and pair.this_period >= Decimal("50000.00"):
+                needs_repair = True
+        elif prev_ytd is not None and pair.ytd + tolerance < prev_ytd:
+            needs_repair = True
+
+        if not needs_repair:
+            continue
+
+        gross_label_lines = [
+            line
+            for line in snapshot.normalized_lines
+            if any(token in line.upper() for token in ["GROSS PAY", "TOTAL GROSS", "YTD GROSS"])
+        ]
+        candidate_values: list[Decimal] = []
+        for line in gross_label_lines:
+            candidate_values.extend(abs(v) for v in extract_money_values(line))
+
+        filtered_candidates: list[Decimal] = []
+        for value in candidate_values:
+            if prev_ytd is not None and value + tolerance < prev_ytd:
+                continue
+            if next_ytd is not None and value - tolerance > next_ytd:
+                continue
+            filtered_candidates.append(value)
+
+        if not filtered_candidates:
+            continue
+
+        corrected_ytd = max(filtered_candidates)
+        corrected_this = pair.this_period
+        if prev_ytd is not None:
+            delta = (corrected_ytd - prev_ytd).quantize(Decimal("0.01"))
+            if delta >= Decimal("0.00"):
+                corrected_this = delta
+
+        snapshot.gross_pay = AmountPair(
+            this_period=corrected_this,
+            ytd=corrected_ytd,
+            source_line=pair.source_line,
+            is_ytd_confirmed=True,
+        )
+
+        target = snapshot.pay_date or snapshot.file
+        issues.append(
+            ConsistencyIssue(
+                severity="warning",
+                code="gross_ytd_repaired",
+                message=(
+                    f"Gross pay YTD on {target} was auto-corrected from "
+                    f"{format_money(pair.ytd)} to {format_money(corrected_ytd)}."
+                ),
+                evidence=" | ".join(gross_label_lines[:2]) if gross_label_lines else pair.source_line,
+                field_name="gross_pay",
+                old_interpretation=(f"this_period={format_money(pair.this_period)}, ytd={format_money(pair.ytd)}"),
+                new_interpretation=(f"this_period={format_money(corrected_this)}, ytd={format_money(corrected_ytd)}"),
+                reason="gross_label_continuity_repair",
+            )
+        )
+        notes_by_file.setdefault(snapshot.file, []).append(
+            f"gross_pay: {format_money(pair.ytd)} -> {format_money(corrected_ytd)}"
+        )
 
     return repaired, issues, notes_by_file
 
@@ -711,8 +1037,8 @@ def run_consistency_checks(
         )
     )
 
-    for pair_name in ["federal_tax", "social_security_tax", "medicare_tax"]:
-        issues.extend(check_this_period_consistency(canonical, pair_name, tolerance=tolerance))
+    # this-period vs YTD-delta mismatches are already emitted in verify_ytd_calculations.
+    # Avoid duplicate noise by not re-running legacy duplicate checks here.
 
     # New Cross-Snapshot Continuity Checks
     issues.extend(check_sequence_gaps(canonical))
@@ -896,8 +1222,17 @@ def analyze_filer(
         snapshots,
         pay_date_overrides=pay_date_overrides,
     )
-    verified_snapshots, ytd_repair_issues, verification_notes_by_file = verify_and_repair_state_ytd_anomalies(
+    promoted_snapshots, promotion_issues = promote_ytd_candidates(
         normalized_snapshots,
+        tolerance=tolerance,
+    )
+    parse_issues = collect_parse_anomaly_issues(promoted_snapshots)
+    gross_repaired_snapshots, gross_repair_issues, gross_notes_by_file = verify_and_repair_gross_ytd_anomalies(
+        promoted_snapshots,
+        tolerance=tolerance,
+    )
+    verified_snapshots, ytd_repair_issues, verification_notes_by_file = verify_and_repair_state_ytd_anomalies(
+        gross_repaired_snapshots,
         tolerance=tolerance,
     )
     canonical_snapshots, duplicate_issues = deduplicate_by_pay_date(verified_snapshots)
@@ -905,7 +1240,7 @@ def analyze_filer(
         canonical_snapshots,
         tolerance=tolerance,
     )
-    combined_notes = merge_verification_notes(verification_notes_by_file, ytd_calc_notes)
+    combined_notes = merge_verification_notes(gross_notes_by_file, verification_notes_by_file, ytd_calc_notes)
     final_snapshot = canonical_snapshots[-1]
     ledger = build_ledger_rows(
         canonical_snapshots,
@@ -919,7 +1254,10 @@ def analyze_filer(
         canonical_snapshots=canonical_snapshots,
     )
     issues = (
-        ytd_repair_issues
+        parse_issues
+        + promotion_issues
+        + gross_repair_issues
+        + ytd_repair_issues
         + ytd_calc_issues
         + override_issues
         + duplicate_issues

@@ -94,6 +94,8 @@ def run_benchmark(manifest_path: Path) -> Dict[str, Any]:
         # [P1] Pre-calculate expected anomalies to ensure recall denominator is accurate
         # even if processing fails in the try block.
         expected_classes = set()
+        for e_cls in gt.get("expected_anomalies", []):
+            expected_classes.add(e_cls)
         for filer in gt.get("filers", []):
             for e_cls in filer.get("expected_anomalies", []):
                 expected_classes.add(e_cls)
@@ -165,7 +167,16 @@ def run_benchmark(manifest_path: Path) -> Dict[str, Any]:
             print(f"FAILED: {e}")
             total_mismatches += 2  # Treat processing failure as total mismatch for metrics
             total_comparison_rows += 2
-            results.append({"id": entry_id, "status": "ERROR", "error": str(e)})
+            results.append(
+                {
+                    "id": entry_id,
+                    "status": "ERROR",
+                    "error": str(e),
+                    "mismatches": 2,
+                    "expected_anomalies": sorted(list(expected_classes)),
+                    "detected_anomalies": [],
+                }
+            )
             continue
 
     duration = time.time() - start_time
