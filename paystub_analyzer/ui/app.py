@@ -379,6 +379,123 @@ div[data-baseweb="input"] input:disabled {
   -webkit-text-fill-color: var(--text-tertiary) !important;
 }
 
+/* Dark-mode guardrails for dropdown readability (system dark or explicit dark theme) */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) div[data-baseweb="select"] > div,
+  html:not([data-theme="light"]) div[data-baseweb="base-input"] > div,
+  html:not([data-theme="light"]) div[data-baseweb="input"] > div {
+    background-color: #1f2630 !important;
+    border-color: #3f4b5b !important;
+    color: #f3f6fb !important;
+  }
+  html:not([data-theme="light"]) div[data-baseweb="select"] span,
+  html:not([data-theme="light"]) div[data-baseweb="select"] input,
+  html:not([data-theme="light"]) div[data-baseweb="base-input"] input,
+  html:not([data-theme="light"]) div[data-baseweb="input"] input,
+  html:not([data-theme="light"]) div[data-baseweb="select"] svg {
+    color: #f3f6fb !important;
+    fill: #f3f6fb !important;
+    -webkit-text-fill-color: #f3f6fb !important;
+  }
+  html:not([data-theme="light"]) [role="listbox"],
+  html:not([data-theme="light"]) div[data-baseweb="popover"] [role="listbox"],
+  html:not([data-theme="light"]) div[data-baseweb="popover"] ul,
+  html:not([data-theme="light"]) div[data-baseweb="popover"] li {
+    background-color: #1b222c !important;
+    color: #f3f6fb !important;
+    border-color: #3f4b5b !important;
+  }
+  html:not([data-theme="light"]) [role="option"],
+  html:not([data-theme="light"]) [role="option"] *,
+  html:not([data-theme="light"]) div[data-baseweb="menu"] [role="menuitem"],
+  html:not([data-theme="light"]) div[data-baseweb="menu"] [role="menuitem"] * {
+    color: #f3f6fb !important;
+    background-color: transparent !important;
+  }
+  html:not([data-theme="light"]) [role="option"][aria-selected="true"] {
+    background-color: #2a3442 !important;
+    color: #f8fafc !important;
+  }
+  html:not([data-theme="light"]) [role="option"]:hover,
+  html:not([data-theme="light"]) [role="option"]:focus-visible {
+    background-color: #27303b !important;
+    color: #f8fafc !important;
+  }
+}
+
+html[data-theme="dark"] div[data-baseweb="select"] > div,
+body[data-theme="dark"] div[data-baseweb="select"] > div,
+[data-theme="dark"] div[data-baseweb="select"] > div,
+html[data-theme="dark"] div[data-baseweb="base-input"] > div,
+body[data-theme="dark"] div[data-baseweb="base-input"] > div,
+[data-theme="dark"] div[data-baseweb="base-input"] > div,
+html[data-theme="dark"] div[data-baseweb="input"] > div,
+body[data-theme="dark"] div[data-baseweb="input"] > div,
+[data-theme="dark"] div[data-baseweb="input"] > div {
+  background-color: #1f2630 !important;
+  border-color: #3f4b5b !important;
+  color: #f3f6fb !important;
+}
+html[data-theme="dark"] div[data-baseweb="select"] span,
+body[data-theme="dark"] div[data-baseweb="select"] span,
+[data-theme="dark"] div[data-baseweb="select"] span,
+html[data-theme="dark"] div[data-baseweb="select"] input,
+body[data-theme="dark"] div[data-baseweb="select"] input,
+[data-theme="dark"] div[data-baseweb="select"] input,
+html[data-theme="dark"] div[data-baseweb="base-input"] input,
+body[data-theme="dark"] div[data-baseweb="base-input"] input,
+[data-theme="dark"] div[data-baseweb="base-input"] input,
+html[data-theme="dark"] div[data-baseweb="input"] input,
+body[data-theme="dark"] div[data-baseweb="input"] input,
+[data-theme="dark"] div[data-baseweb="input"] input,
+html[data-theme="dark"] div[data-baseweb="select"] svg,
+body[data-theme="dark"] div[data-baseweb="select"] svg,
+[data-theme="dark"] div[data-baseweb="select"] svg {
+  color: #f3f6fb !important;
+  fill: #f3f6fb !important;
+  -webkit-text-fill-color: #f3f6fb !important;
+}
+html[data-theme="dark"] [role="listbox"],
+body[data-theme="dark"] [role="listbox"],
+[data-theme="dark"] [role="listbox"],
+html[data-theme="dark"] div[data-baseweb="popover"] [role="listbox"],
+body[data-theme="dark"] div[data-baseweb="popover"] [role="listbox"],
+[data-theme="dark"] div[data-baseweb="popover"] [role="listbox"],
+html[data-theme="dark"] div[data-baseweb="popover"] ul,
+body[data-theme="dark"] div[data-baseweb="popover"] ul,
+[data-theme="dark"] div[data-baseweb="popover"] ul,
+html[data-theme="dark"] div[data-baseweb="popover"] li,
+body[data-theme="dark"] div[data-baseweb="popover"] li,
+[data-theme="dark"] div[data-baseweb="popover"] li {
+  background-color: #1b222c !important;
+  color: #f3f6fb !important;
+  border-color: #3f4b5b !important;
+}
+html[data-theme="dark"] [role="option"],
+body[data-theme="dark"] [role="option"],
+[data-theme="dark"] [role="option"],
+html[data-theme="dark"] [role="option"] *,
+body[data-theme="dark"] [role="option"] *,
+[data-theme="dark"] [role="option"] * {
+  color: #f3f6fb !important;
+  background-color: transparent !important;
+}
+html[data-theme="dark"] [role="option"][aria-selected="true"],
+body[data-theme="dark"] [role="option"][aria-selected="true"],
+[data-theme="dark"] [role="option"][aria-selected="true"] {
+  background-color: #2a3442 !important;
+  color: #f8fafc !important;
+}
+html[data-theme="dark"] [role="option"]:hover,
+body[data-theme="dark"] [role="option"]:hover,
+[data-theme="dark"] [role="option"]:hover,
+html[data-theme="dark"] [role="option"]:focus-visible,
+body[data-theme="dark"] [role="option"]:focus-visible,
+[data-theme="dark"] [role="option"]:focus-visible {
+  background-color: #27303b !important;
+  color: #f8fafc !important;
+}
+
 /* Button Styling Fixes */
 div.stButton > button,
 div.stButton button,
