@@ -209,8 +209,7 @@ def promote_ytd_candidates(
                         severity="warning",
                         code="zero_period_ytd_promotion_rejected",
                         message=(
-                            f"Skipped YTD promotion for {field_label} on {target}: "
-                            "no neighboring YTD values available."
+                            f"Skipped YTD promotion for {field_label} on {target}: no neighboring YTD values available."
                         ),
                         evidence=pair.source_line,
                         field_name=field_label,
@@ -478,8 +477,7 @@ def verify_and_repair_gross_ytd_anomalies(
                     )
                 )
                 notes_by_file.setdefault(snapshot.file, []).append(
-                    f"gross_pay_this_period: {format_money(pair.this_period)} -> "
-                    f"{format_money(corrected_this_period)}"
+                    f"gross_pay_this_period: {format_money(pair.this_period)} -> {format_money(corrected_this_period)}"
                 )
                 continue
 
