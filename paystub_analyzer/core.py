@@ -616,8 +616,7 @@ def select_latest_paystub(files: list[Path]) -> tuple[Path, date]:
         if len(unresolved) > 5:
             unresolved_preview += ", ..."
         raise RuntimeError(
-            "Could not determine pay dates from paystub filenames. "
-            f"Unresolved files: {unresolved_preview or 'none'}."
+            f"Could not determine pay dates from paystub filenames. Unresolved files: {unresolved_preview or 'none'}."
         )
     return sorted(dated, key=lambda item: (item[1], item[0].name))[-1]
 
