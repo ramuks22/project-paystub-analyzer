@@ -316,6 +316,62 @@ class AnnualTests(unittest.TestCase):
             any(issue["code"] == "state_ytd_outlier_corrected" for issue in result["meta"]["consistency_issues"])
         )
 
+    def test_repairs_gross_this_period_from_ytd_delta(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-11-28.pdf",
+            pay_date="2025-11-28",
+            gross_pay=pair("6901.67", "110235.05"),
+            federal_income_tax=pair("1011.33", "14716.86"),
+            social_security_tax=pair("402.22", "6481.32"),
+            medicare_tax=pair("94.06", "1515.79"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"AZ": pair("0.00", "498.26"), "VA": pair("297.35", "4131.66")},
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/Pay Date 2025-12-15.pdf",
+            pay_date="2025-12-15",
+            gross_pay=pair("104235.00", "110235.05"),
+            federal_income_tax=pair(None, "14716.86"),
+            social_security_tax=pair("12.89", "6468.43"),
+            medicare_tax=pair("3.01", "1512.78"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"AZ": pair(None, "498.26"), "VA": pair(None, "4131.66")},
+            normalized_lines=[],
+        )
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+
+        row_1215 = next(row for row in result["ledger"] if row["pay_date"] == "2025-12-15")
+        self.assertEqual(row_1215["gross_pay_this_period"], 0.0)
+        self.assertEqual(row_1215["gross_pay_ytd"], 110235.05)
+        self.assertTrue(
+            any(issue["code"] == "gross_this_period_repaired" for issue in result["meta"]["consistency_issues"])
+        )
+
+    def test_emits_single_federal_ytd_calc_mismatch_issue(self) -> None:
+        s1 = snapshot("2025-01-15", gross=("100.00", "100.00"), fed=("20.00", "20.00"))
+        s2 = snapshot("2025-01-31", gross=("100.00", "200.00"), fed=("20.00", "50.00"))
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+
+        fed_mismatch_issues = [
+            issue
+            for issue in result["meta"]["consistency_issues"]
+            if issue["code"] == "ytd_calc_mismatch" and "federal_income_tax" in issue["message"]
+        ]
+        self.assertEqual(len(fed_mismatch_issues), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

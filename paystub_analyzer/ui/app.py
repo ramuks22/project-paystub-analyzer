@@ -19,6 +19,7 @@ import streamlit as st
 
 
 from paystub_analyzer.core import (
+    AmountPair,
     as_float,
     extract_paystub_snapshot,
     format_money,
@@ -52,12 +53,27 @@ def get_cached_w2_payload(
     return w2_pdf_to_json_payload(Path(pdf_path_str), render_scale=render_scale, psm=psm, fallback_year=fallback_year)
 
 
+@st.cache_data(show_spinner=False)
+def get_cached_config_w2_payload(
+    file_paths: tuple[str, ...],
+    base_dir_str: str,
+    tax_year: int,
+    render_scale: float,
+) -> dict[str, Any] | None:
+    from paystub_analyzer.w2_aggregator import load_and_aggregate_w2s
+
+    return load_and_aggregate_w2s(list(file_paths), Path(base_dir_str), tax_year, pdf_render_scale=render_scale)
+
+
 build_tax_filing_package = annual_module.build_tax_filing_package
 collect_annual_snapshots = annual_module.collect_annual_snapshots
 package_to_markdown = annual_module.package_to_markdown
 
-APP_SESSION_SCHEMA_VERSION = "2026-02-19-ui-polish-v3"
+APP_SESSION_SCHEMA_VERSION = "2026-02-25-household-w2-defaults-v1"
 ButtonKind = Literal["primary", "secondary", "tertiary"]
+
+DEFAULT_PRIMARY_PAYSTUB_DIR = "pay_statements"
+DEFAULT_SPOUSE_PAYSTUB_DIR = "pay_statements/spouse"
 
 
 def apply_theme() -> None:
@@ -915,6 +931,7 @@ def clear_workflow_state() -> None:
         "_w2_autofilled_fields",
         "manual_w2_prefill_source",
         "manual_w2_states",
+        "_w2_config_loaded_tag",
         "box1",
         "box2",
         "box3",
@@ -1021,6 +1038,15 @@ def build_extraction_quality(snapshot: PaystubSnapshot) -> dict[str, Any]:
     if evidence_count < 5:
         issues.append({"severity": "warning", "message": "Low evidence coverage detected; verify OCR output lines."})
         score -= 10
+
+    if any(anomaly.get("code") == "zero_period_ui_inferred_ytd" for anomaly in snapshot.parse_anomalies):
+        issues.append(
+            {
+                "severity": "warning",
+                "message": "Zero-pay period inference applied: single-value tax lines were interpreted as YTD.",
+            }
+        )
+        score -= 5
 
     score = max(0, min(100, score))
     confidence = "High" if score >= 85 else "Medium" if score >= 65 else "Low"
@@ -1272,6 +1298,89 @@ def snapshot_to_dict(snapshot: PaystubSnapshot) -> dict[str, Any]:
             for state, pair in sorted(snapshot.state_income_tax.items())
         },
     }
+
+
+def _amount_pair_from_payload(payload: dict[str, Any] | None) -> AmountPair:
+    if not isinstance(payload, dict):
+        return AmountPair(None, None, None)
+    this_period = to_decimal(payload.get("this_period"))
+    ytd = to_decimal(payload.get("ytd"))
+    evidence = payload.get("evidence")
+    evidence_line = str(evidence) if evidence is not None else None
+    return AmountPair(this_period=this_period, ytd=ytd, source_line=evidence_line)
+
+
+def snapshot_from_extracted_payload(
+    extracted: dict[str, Any],
+    file_path: str,
+    pay_date: str | None,
+) -> PaystubSnapshot:
+    state_pairs: dict[str, AmountPair] = {}
+    state_payload = extracted.get("state_income_tax", {})
+    if isinstance(state_payload, dict):
+        for state, pair_payload in sorted(state_payload.items()):
+            state_pairs[str(state)] = _amount_pair_from_payload(cast(dict[str, Any], pair_payload))
+    return PaystubSnapshot(
+        file=file_path,
+        pay_date=pay_date,
+        gross_pay=_amount_pair_from_payload(cast(dict[str, Any], extracted.get("gross_pay", {}))),
+        federal_income_tax=_amount_pair_from_payload(cast(dict[str, Any], extracted.get("federal_income_tax", {}))),
+        social_security_tax=_amount_pair_from_payload(cast(dict[str, Any], extracted.get("social_security_tax", {}))),
+        medicare_tax=_amount_pair_from_payload(cast(dict[str, Any], extracted.get("medicare_tax", {}))),
+        k401_contrib=_amount_pair_from_payload(cast(dict[str, Any], extracted.get("k401_contrib", {}))),
+        state_income_tax=state_pairs,
+        normalized_lines=[],
+    )
+
+
+def apply_zero_period_ui_inference(snapshot: PaystubSnapshot) -> PaystubSnapshot:
+    gross_this_period = to_decimal(snapshot.gross_pay.this_period)
+    if gross_this_period is None or abs(gross_this_period) > Decimal("0.01"):
+        return snapshot
+
+    promoted_fields: list[str] = []
+
+    def promote_pair(field_name: str, pair: AmountPair) -> AmountPair:
+        if pair.ytd is not None or pair.this_period is None or pair.this_period <= Decimal("0.00"):
+            return pair
+        promoted_fields.append(field_name)
+        return AmountPair(
+            this_period=None,
+            ytd=pair.this_period,
+            source_line=pair.source_line,
+            is_ytd_confirmed=True,
+        )
+
+    state_pairs = {
+        state: promote_pair(f"state_income_tax_{state}", pair) for state, pair in snapshot.state_income_tax.items()
+    }
+
+    normalized = PaystubSnapshot(
+        file=snapshot.file,
+        pay_date=snapshot.pay_date,
+        gross_pay=snapshot.gross_pay,
+        federal_income_tax=promote_pair("federal_income_tax", snapshot.federal_income_tax),
+        social_security_tax=promote_pair("social_security_tax", snapshot.social_security_tax),
+        medicare_tax=promote_pair("medicare_tax", snapshot.medicare_tax),
+        k401_contrib=snapshot.k401_contrib,
+        state_income_tax=state_pairs,
+        normalized_lines=list(snapshot.normalized_lines),
+        parse_anomalies=list(snapshot.parse_anomalies),
+    )
+
+    if promoted_fields:
+        normalized.parse_anomalies.append(
+            {
+                "code": "zero_period_ui_inferred_ytd",
+                "severity": "warning",
+                "message": (
+                    "UI inferred single-value taxes as YTD because gross pay this period is $0.00. "
+                    f"Fields: {', '.join(sorted(promoted_fields))}"
+                ),
+                "evidence": normalized.pay_date or normalized.file,
+            }
+        )
+    return normalized
 
 
 def get_filer_pay_date_overrides(filer_id: str) -> dict[str, str]:
@@ -1621,7 +1730,42 @@ def resolve_household_path(path_value: str, base_dir: Path) -> Path:
     return (base_dir / raw_path).resolve()
 
 
+def first_existing_path(candidates: list[str], base_dir: Path) -> str:
+    for candidate in candidates:
+        if not candidate:
+            continue
+        resolved = resolve_household_path(candidate, base_dir)
+        if resolved.exists():
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def discover_default_w2_path(filer_id: str, tax_year: int, base_dir: Path) -> str:
+    w2_dir = resolve_household_path("w2_forms", base_dir)
+    if not w2_dir.exists():
+        return ""
+
+    filer = filer_id.lower().strip()
+    if filer == "spouse":
+        candidates = [
+            f"w2_forms/W2_{tax_year}_Spouse_Redacted.pdf",
+            f"w2_forms/W2_{tax_year}_Spouse.pdf",
+            f"w2_forms/w2_{tax_year}_spouse.json",
+        ]
+        return first_existing_path(candidates, base_dir)
+
+    candidates = [
+        f"w2_forms/W2_{tax_year}_Sasie_Redacted.pdf",
+        f"w2_forms/W2_{tax_year}_Primary_Redacted.pdf",
+        f"w2_forms/W2_{tax_year}.pdf",
+        f"w2_forms/w2_{tax_year}.json",
+        f"w2_forms/w2_{tax_year}_primary.json",
+    ]
+    return first_existing_path(candidates, base_dir)
+
+
 def render_anomaly_audit(issues: list[dict[str, Any]], filer_id: str) -> None:
+    st.markdown("<div id='consistency-audit'></div>", unsafe_allow_html=True)
     if not issues:
         st.success("✅ No consistency or continuity anomalies detected.")
         return
@@ -1693,6 +1837,36 @@ def render_anomaly_audit(issues: list[dict[str, Any]], filer_id: str) -> None:
             st.rerun()
 
 
+def render_auto_heal_panel(issues: list[dict[str, Any]]) -> None:
+    auto_heal_codes = {
+        "zero_period_ytd_promoted",
+        "state_ytd_underflow_corrected",
+        "state_ytd_outlier_corrected",
+        "gross_ytd_repaired",
+        "gross_this_period_repaired",
+        "implausible_amount_filtered",
+    }
+    healed_rows = [issue for issue in issues if str(issue.get("code")) in auto_heal_codes]
+    if not healed_rows:
+        return
+
+    st.markdown("#### Auto-heal applied")
+    st.caption("These parser/continuity adjustments were applied automatically and are tracked in the filing audit.")
+    display_rows: list[dict[str, Any]] = []
+    for issue in healed_rows:
+        display_rows.append(
+            {
+                "Code": issue.get("code"),
+                "Field": issue.get("field_name") or "—",
+                "Old Interpretation": issue.get("old_interpretation") or "—",
+                "New Interpretation": issue.get("new_interpretation") or "—",
+                "Reason": issue.get("reason") or issue.get("message") or "—",
+                "Evidence": issue.get("evidence") or "—",
+            }
+        )
+    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+
+
 def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
     if not ledger:
         return ""
@@ -1730,6 +1904,7 @@ def ledger_to_csv(ledger: list[dict[str, Any]]) -> str:
 def render_setup_wizard() -> None:
     st.markdown("## Household Setup Wizard")
     st.markdown("Configure your household details to begin the analysis.")
+    wizard_base_dir = Path.cwd()
 
     tab1, tab2 = st.tabs(["Manual Setup", "Load Config File"])
 
@@ -1798,25 +1973,47 @@ def render_setup_wizard() -> None:
                 )
 
             st.markdown("### Filers")
-            primary_dir = st.text_input("Primary Filer Paystubs Directory", value="pay_statements")
+            primary_dir = st.text_input("Primary Filer Paystubs Directory", value=DEFAULT_PRIMARY_PAYSTUB_DIR)
+            primary_w2_default = discover_default_w2_path("primary", int(tax_year), wizard_base_dir)
+            primary_w2_path = st.text_input(
+                "Primary W-2 file (optional)",
+                value=primary_w2_default,
+                help="Relative to repo root. Supports PDF or JSON.",
+            )
 
-            include_spouse = st.checkbox("Include Spouse?")
-            spouse_dir = ""
+            include_spouse = st.checkbox(
+                "Include Spouse?",
+                value=resolve_household_path(DEFAULT_SPOUSE_PAYSTUB_DIR, wizard_base_dir).exists(),
+            )
+            spouse_dir = DEFAULT_SPOUSE_PAYSTUB_DIR
+            spouse_w2_path = ""
             if include_spouse:
-                spouse_dir = st.text_input("Spouse Paystubs Directory", value="pay_statements_spouse")
+                spouse_dir = st.text_input("Spouse Paystubs Directory", value=DEFAULT_SPOUSE_PAYSTUB_DIR)
+                spouse_w2_default = discover_default_w2_path("spouse", int(tax_year), wizard_base_dir)
+                spouse_w2_path = st.text_input(
+                    "Spouse W-2 file (optional)",
+                    value=spouse_w2_default,
+                    help="Relative to repo root. Supports PDF or JSON.",
+                )
 
             submitted = st.form_submit_button("Start Analysis")
             if submitted:
+                primary_sources: dict[str, Any] = {"paystubs_dir": primary_dir.strip()}
+                if primary_w2_path.strip():
+                    primary_sources["w2_files"] = [primary_w2_path.strip()]
                 config: dict[str, Any] = {
                     "version": "0.4.0",
                     "household_id": f"household_{tax_year}",
                     "filing_year": int(tax_year),
                     "state": state,
                     "filing_status": filing_status,
-                    "filers": [{"id": "primary", "role": "PRIMARY", "sources": {"paystubs_dir": primary_dir}}],
+                    "filers": [{"id": "primary", "role": "PRIMARY", "sources": primary_sources}],
                 }
-                if include_spouse and spouse_dir:
-                    config["filers"].append({"id": "spouse", "role": "SPOUSE", "sources": {"paystubs_dir": spouse_dir}})
+                if include_spouse and spouse_dir.strip():
+                    spouse_sources: dict[str, Any] = {"paystubs_dir": spouse_dir.strip()}
+                    if spouse_w2_path.strip():
+                        spouse_sources["w2_files"] = [spouse_w2_path.strip()]
+                    config["filers"].append({"id": "spouse", "role": "SPOUSE", "sources": spouse_sources})
 
                 from paystub_analyzer.utils.contracts import validate_output
 
@@ -1924,6 +2121,8 @@ def main() -> None:
     step3_complete = prior_packet is not None
 
     step2_needs_review = False
+    unresolved_critical_codes: list[str] = []
+    active_filer_consistency_issues: list[dict[str, Any]] = []
 
     # 1. Check for W-2 comparison mismatches
     if isinstance(prior_w2_validation, dict):
@@ -1937,14 +2136,17 @@ def main() -> None:
     if isinstance(annual_preview, dict):
         for filer in annual_preview.get("filers_analysis", []):
             f_id = filer["public"]["id"]
-            f_reviewed = reviewed.get(f_id, set())
             f_issues = filer["internal"]["meta"].get("consistency_issues", [])
+            if f_id == active_filer_id:
+                active_filer_consistency_issues = cast(list[dict[str, Any]], f_issues)
+            f_reviewed = reviewed.get(f_id, set())
             for issue in f_issues:
                 if issue.get("severity") == "critical":
                     message = issue.get("message", "")
                     code = issue.get("code", "unknown")
                     issue_id = f"{code}_{hashlib.md5(message.encode()).hexdigest()[:8]}"
                     if issue_id not in f_reviewed:
+                        unresolved_critical_codes.append(str(code))
                         step2_needs_review = True
                         break
 
@@ -2190,6 +2392,30 @@ def main() -> None:
                             annual_result = {"report": report_payload, "filers_analysis": [analysis_obj]}
 
                             snapshot = fallback_snapshot
+
+                        annual_filers = cast(list[dict[str, Any]], annual_result.get("filers_analysis", []))
+                        active_analysis = next(
+                            (f for f in annual_filers if f.get("public", {}).get("id") == active_filer_id),
+                            None,
+                        )
+                        if active_analysis is None and annual_filers:
+                            active_analysis = annual_filers[0]
+                        if active_analysis is not None:
+                            active_meta = cast(dict[str, Any], active_analysis.get("internal", {}).get("meta", {}))
+                            extracted_payload = active_meta.get("extracted")
+                            if isinstance(extracted_payload, dict):
+                                latest_file_for_view = str(active_meta.get("latest_paystub_file") or latest_file)
+                                latest_pay_date_for_view = cast(str | None, active_meta.get("latest_pay_date"))
+                                snapshot = snapshot_from_extracted_payload(
+                                    extracted=extracted_payload,
+                                    file_path=latest_file_for_view,
+                                    pay_date=latest_pay_date_for_view,
+                                )
+                                st.session_state["snapshot"] = snapshot
+                        if "snapshot" not in locals():
+                            latest_hash = _hash_file(latest_file)
+                            snapshot = get_cached_paystub_snapshot(str(latest_file), latest_hash, render_scale)
+                            snapshot = apply_zero_period_ui_inference(snapshot)
                             st.session_state["snapshot"] = snapshot
 
                         st.session_state["annual_summary_preview"] = annual_result
@@ -2204,6 +2430,7 @@ def main() -> None:
                     else:
                         file_hash = _hash_file(Path(selected))
                         snapshot = get_cached_paystub_snapshot(str(selected), file_hash, render_scale)
+                        snapshot = apply_zero_period_ui_inference(snapshot)
                         st.session_state["snapshot"] = snapshot
                         st.session_state.pop("annual_summary_preview", None)
                         st.session_state["analysis_scope"] = "single"
@@ -2561,6 +2788,8 @@ def main() -> None:
         "W-2 Comparison",
         "Auto-fill or enter W-2 values and run a strict field-by-field comparison against the extracted payslip totals.",
     )
+    if active_filer_consistency_issues:
+        render_auto_heal_panel(active_filer_consistency_issues)
     upload_version = int(st.session_state.get("_w2_upload_version", 0))
     uploaded = st.file_uploader(
         "Upload W-2 JSON or PDF (optional)",
@@ -2602,6 +2831,38 @@ def main() -> None:
                 return
             finally:
                 temp_path.unlink(missing_ok=True)
+
+    # Auto-load W-2 from household setup for the active filer when upload is not provided.
+    if uploaded is None and w2_data is None and active_filer_cfg is not None:
+        filer_sources = cast(dict[str, Any], active_filer_cfg.get("sources", {}))
+        config_w2_files = [
+            str(path) for path in cast(list[Any], filer_sources.get("w2_files", [])) if str(path).strip()
+        ]
+        if config_w2_files:
+            try:
+                config_source_tag = "|".join(
+                    [
+                        "config",
+                        str(active_filer_id),
+                        str(int(year)),
+                        ",".join(config_w2_files),
+                    ]
+                )
+                w2_data = get_cached_config_w2_payload(
+                    file_paths=tuple(config_w2_files),
+                    base_dir_str=str(config_base_dir),
+                    tax_year=int(year),
+                    render_scale=max(render_scale, 3.0),
+                )
+                uploaded_source_tag = config_source_tag
+                if st.session_state.get("_w2_config_loaded_tag") != config_source_tag:
+                    show_notice(
+                        f"Loaded W-2 from household setup for `{active_filer_id}`. "
+                        "W-2 input fields were auto-populated."
+                    )
+                    st.session_state["_w2_config_loaded_tag"] = config_source_tag
+            except Exception as exc:
+                st.warning(f"Could not auto-load configured W-2 for `{active_filer_id}`: {exc}")
 
     snapshot_states = sorted(snapshot.state_income_tax.keys()) or ["VA"]
     if w2_data is not None:
@@ -2671,7 +2932,14 @@ def main() -> None:
                 mime="text/markdown",
             )
         if step2_needs_review:
-            st.warning("Step 3 remains locked until Step 2 is marked Completed (no mismatches / review-needed flags).")
+            critical_hint = ""
+            if unresolved_critical_codes:
+                unique_codes = ", ".join(sorted(set(unresolved_critical_codes)))
+                critical_hint = f" Unreviewed critical extraction flags: {unique_codes}."
+            st.warning(
+                "Step 3 remains locked until Step 2 is completed (no mismatches/review-needed flags and all critical "
+                f"anomalies reviewed in [Consistency Audit](#consistency-audit)).{critical_hint}"
+            )
 
     if step2_marked_completed:
         st.markdown("---")

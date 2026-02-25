@@ -16,6 +16,7 @@ This project extracts tax evidence from ADP-style paystubs, cross-verifies it ag
 Default folders:
 
 - Paystubs: `pay_statements`
+- Spouse paystubs (recommended): `pay_statements/spouse`
 - W-2 files: `w2_forms`
 
 ## What It Does
@@ -35,6 +36,9 @@ Default folders:
 - Runs consistency checks (duplicate pay dates, YTD decreases, this-period vs YTD delta anomalies).
 - Verifies parsed YTD values against calculated YTD (`previous_ytd + this_period`) during annual runs.
 - Auto-corrects high-confidence OCR state-tax YTD spikes and records them in ledger column `ytd_verification`.
+- Applies continuity-gated zero-period YTD promotion (for unpaid-leave style stubs where tax values are shown once as YTD).
+- Auto-repairs gross this-period values when OCR swaps in cumulative totals (uses YTD continuity delta and audit flags).
+- Filters implausible OCR money tokens and records `implausible_amount_filtered` parse anomalies for audit review.
 - Produces a tax filing packet (JSON + Markdown + ledger CSV).
 - Provides a Streamlit UI for interactive review.
 
@@ -179,6 +183,12 @@ Analyze multiple filers (Primary + Optional Spouse) together. Supports **multipl
 paystub-annual --year 2025 --household-config household_config.json
 ```
 
+In the UI setup wizard, you can now set per-filer W-2 files directly. For your current layout:
+
+- Primary paystubs: `pay_statements`
+- Spouse paystubs: `pay_statements/spouse`
+- Spouse W-2: `w2_forms/W2_2025_Spouse_Redacted.pdf`
+
 **Interactive Mode:**
 
 If you prefer prompts instead of arguments:
@@ -193,6 +203,19 @@ paystub-annual --interactive
 # Note context: standalone extraction script not exposed as CLI yet, use library or add script if needed.
 # For now, paystub-w2 handles this. Removing standalone script ref to avoid confusion.
 ```
+
+### 6) Freeze Local Baseline Snapshots (v0.5.1 hotfix support)
+
+Use this to capture private regression artifacts from real files without committing sensitive data:
+
+```bash
+python scripts/freeze_baseline.py \
+  --paystubs-dir pay_statements \
+  --year 2025 \
+  --out-dir private_notes/baseline_v0.5.0
+```
+
+Real-data mode refuses writing under `tests/fixtures/` to prevent accidental PII commits.
 
 ### Tests
 

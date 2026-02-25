@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -14,10 +14,14 @@ from typing import Callable
 
 import pypdfium2 as pdfium
 
-MONEY_RE = re.compile(r"[+-]?(?:\$|S)?\d[\d,\s]*\.\d{2}", re.IGNORECASE)
+MONEY_RE = re.compile(
+    r"[+-]?(?:\$|S)?(?:\d{1,3}(?:,\s?\d{3})+|\d+)\.\d{2}",
+    re.IGNORECASE,
+)
 FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
 TEXT_PAY_DATE_RE = re.compile(r"Pay Date:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 STATE_TAX_LINE_RE = re.compile(r"\b([A-Z]{2}) State Income Tax\b", re.IGNORECASE)
+MAX_PLAUSIBLE_AMOUNT = Decimal("10000000.00")
 OcrTextProvider = Callable[[Path, float, int], str]
 
 
@@ -40,6 +44,7 @@ class PaystubSnapshot:
     k401_contrib: AmountPair
     state_income_tax: dict[str, AmountPair]
     normalized_lines: list[str]
+    parse_anomalies: list[dict[str, str]] = field(default_factory=list)
 
 
 def heal_numeric_noise(text: str) -> str:
@@ -88,10 +93,50 @@ def parse_money(token: str) -> Decimal | None:
         return None
 
 
-def extract_money_values(line: str) -> list[Decimal]:
+def extract_money_values_with_anomalies(line: str) -> tuple[list[Decimal], list[dict[str, str]]]:
     tokens = MONEY_RE.findall(line)
-    results = [parse_money(t) for t in tokens]
-    return [r for r in results if r is not None]
+    values: list[Decimal] = []
+    anomalies: list[dict[str, str]] = []
+    for token in tokens:
+        parsed = parse_money(token)
+        if parsed is None:
+            continue
+        abs_value = abs(parsed)
+        if abs_value > MAX_PLAUSIBLE_AMOUNT:
+            anomalies.append(
+                {
+                    "code": "implausible_amount_filtered",
+                    "severity": "warning",
+                    "message": f"Filtered implausible money token `{token}` parsed as {abs_value}.",
+                    "evidence": line,
+                }
+            )
+            continue
+        values.append(parsed)
+    return values, anomalies
+
+
+def extract_money_values(line: str) -> list[Decimal]:
+    values, _ = extract_money_values_with_anomalies(line)
+    return values
+
+
+def guess_field_from_line(line: str) -> str:
+    upper = line.upper()
+    state_match = STATE_TAX_LINE_RE.search(line)
+    if state_match:
+        return f"state_income_tax_{state_match.group(1).upper()}"
+    if "FEDERAL" in upper or "WITHHOLDING" in upper:
+        return "federal_income_tax"
+    if "SOCIAL SECURITY" in upper or "SOC SEC" in upper or "SOC." in upper:
+        return "social_security_tax"
+    if "MEDICARE" in upper:
+        return "medicare_tax"
+    if "GROSS" in upper or "REGULAR" in upper:
+        return "gross_pay"
+    if "401" in upper:
+        return "k401_contrib"
+    return "unknown"
 
 
 def parse_amount_pair_from_line(line: str) -> AmountPair:
@@ -298,12 +343,6 @@ def extract_state_tax_pairs(lines: list[str]) -> dict[str, AmountPair]:
         if pair.ytd is None and pair.this_period is None:
             continue
 
-        # [P0] Promotion: If ytd is missing but this_period exists, promote it to YTD
-        # to ensure downstream consumers (like LEDGERS) detect the value.
-        if pair.ytd is None and pair.this_period is not None:
-            pair.ytd = pair.this_period
-            # We keep this_period as well, as it's likely both in many layouts
-            # where only one value is shown.
         existing = result.get(state)
         if existing is None:
             result[state] = pair
@@ -312,6 +351,38 @@ def extract_state_tax_pairs(lines: list[str]) -> dict[str, AmountPair]:
         if (pair.ytd or Decimal("0.00")) > existing_ytd:
             result[state] = pair
     return result
+
+
+def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
+    # Prefer explicit gross labels first. "REGULAR" is kept only as fallback because
+    # some layouts have separate regular earnings rows that can collide with gross rows.
+    strict = find_line_amount_pair(lines, r"\b(Gross Pay|YTD Gross|Total Gross|Gross)\b")
+    regular = find_line_amount_pair(lines, r"\b(REGULAR)\b")
+
+    if strict.ytd is not None:
+        return strict
+
+    if strict.this_period is None and strict.ytd is None:
+        return regular
+
+    # OCR can drop punctuation in this-period on "Gross Pay" lines and leave a single
+    # large value that is actually YTD. If that happens, salvage this-period from a
+    # regular row and treat the strict large value as YTD.
+    strict_value = strict.this_period
+    if strict_value is not None and strict_value >= Decimal("10000.00"):
+        regular_this = regular.this_period
+        regular_ytd = regular.ytd
+        this_candidate = regular_ytd if regular_ytd is not None and regular_ytd < strict_value else regular_this
+        if this_candidate is not None and this_candidate <= strict_value:
+            merged_source_parts = [part for part in [strict.source_line, regular.source_line] if part]
+            return AmountPair(
+                this_period=this_candidate,
+                ytd=strict_value,
+                source_line=" | ".join(dict.fromkeys(merged_source_parts)),
+                is_ytd_confirmed=True,
+            )
+
+    return strict
 
 
 def extract_paystub_snapshot(
@@ -324,6 +395,23 @@ def extract_paystub_snapshot(
     text = provider(pdf_path, render_scale, psm)
     lines = [normalize_line(line) for line in text.splitlines()]
     lines = [line for line in lines if line]
+    parse_anomalies: list[dict[str, str]] = []
+    seen_anomalies: set[tuple[str, str, str]] = set()
+    for index, line in enumerate(lines):
+        _, anomalies = extract_money_values_with_anomalies(line)
+        for anomaly in anomalies:
+            enriched = dict(anomaly)
+            enriched["field_guess"] = guess_field_from_line(line)
+            enriched["line_index"] = str(index + 1)
+            key = (
+                enriched.get("code", ""),
+                enriched.get("message", ""),
+                enriched.get("evidence", ""),
+            )
+            if key in seen_anomalies:
+                continue
+            seen_anomalies.add(key)
+            parse_anomalies.append(enriched)
 
     pay_date = parse_pay_date_from_text(text)
     if pay_date is None:
@@ -332,7 +420,7 @@ def extract_paystub_snapshot(
     return PaystubSnapshot(
         file=str(pdf_path),
         pay_date=pay_date.isoformat() if pay_date else None,
-        gross_pay=find_line_amount_pair(lines, r"\b(Gross Pay|YTD Gross|REGULAR|Total Gross|Gross)\b"),
+        gross_pay=extract_gross_pay_pair(lines),
         federal_income_tax=find_line_amount_pair(
             lines, r"\b(Federal Income Tax|Fed Income Tax|Federal Tax|withholding)\b"
         ),
@@ -341,6 +429,7 @@ def extract_paystub_snapshot(
         k401_contrib=find_line_amount_pair(lines, r"\b(401\(K\) Contrib|401k)\b"),
         state_income_tax=extract_state_tax_pairs(lines),
         normalized_lines=lines,
+        parse_anomalies=parse_anomalies,
     )
 
 
