@@ -18,8 +18,12 @@ MONEY_RE = re.compile(
     r"[+-]?(?:\$|S)?(?:\d{1,3}(?:,\s?\d{3})+|\d+)\.\d{2}",
     re.IGNORECASE,
 )
-FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
-TEXT_PAY_DATE_RE = re.compile(r"Pay Date:\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
+ADP_FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
+UKG_FILENAME_PAY_DATE_RE = re.compile(r"^EEPayrollPayCheckDetail_(\d{8})\.pdf$", re.IGNORECASE)
+TEXT_PAY_DATE_RE = re.compile(
+    r"(?:Pay Date|Pay Period End|Period Ending)\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})",
+    re.IGNORECASE,
+)
 STATE_TAX_LINE_RE = re.compile(r"\b([A-Z]{2}) State Income Tax\b", re.IGNORECASE)
 MAX_PLAUSIBLE_AMOUNT = Decimal("10000000.00")
 OcrTextProvider = Callable[[Path, float, int], str]
@@ -176,18 +180,30 @@ def parse_amount_pair_from_line(line: str) -> AmountPair:
     return AmountPair(first, None, normalized)
 
 
+def parse_pay_date_from_filename_any(path: Path) -> date | None:
+    adp_match = ADP_FILENAME_PAY_DATE_RE.search(path.name)
+    if adp_match:
+        return datetime.strptime(adp_match.group(1), "%Y-%m-%d").date()
+
+    ukg_match = UKG_FILENAME_PAY_DATE_RE.search(path.name)
+    if ukg_match:
+        return datetime.strptime(ukg_match.group(1), "%m%d%Y").date()
+
+    return None
+
+
 def parse_pay_date_from_filename(path: Path) -> date | None:
-    match = FILENAME_PAY_DATE_RE.search(path.name)
-    if not match:
-        return None
-    return datetime.strptime(match.group(1), "%Y-%m-%d").date()
+    # Backward-compatible wrapper used throughout the codebase.
+    return parse_pay_date_from_filename_any(path)
 
 
 def parse_pay_date_from_text(text: str) -> date | None:
-    match = TEXT_PAY_DATE_RE.search(text)
-    if not match:
-        return None
-    return datetime.strptime(match.group(1), "%m/%d/%Y").date()
+    for match in TEXT_PAY_DATE_RE.finditer(text):
+        try:
+            return datetime.strptime(match.group(1), "%m/%d/%Y").date()
+        except ValueError:
+            continue
+    return None
 
 
 def ensure_tesseract_available() -> None:
@@ -353,7 +369,63 @@ def extract_state_tax_pairs(lines: list[str]) -> dict[str, AmountPair]:
     return result
 
 
+def extract_ukg_pay_summary_gross_pair(lines: list[str]) -> AmountPair:
+    pay_summary_index: int | None = None
+    for index, line in enumerate(lines):
+        if "PAY SUMMARY" in line.upper():
+            pay_summary_index = index
+            break
+
+    if pay_summary_index is None:
+        return AmountPair(None, None, None)
+
+    current: Decimal | None = None
+    ytd: Decimal | None = None
+    sources: list[str] = []
+
+    for line in lines[pay_summary_index + 1 : pay_summary_index + 12]:
+        upper = line.upper()
+        if upper.startswith("CURRENT"):
+            amounts = [abs(value) for value in extract_money_values(line)]
+            if amounts:
+                current = amounts[0]
+                sources.append(line)
+            continue
+        if upper.startswith("YTD"):
+            amounts = [abs(value) for value in extract_money_values(line)]
+            if amounts:
+                ytd = amounts[0]
+                sources.append(line)
+            continue
+        if (
+            current is not None
+            and ytd is not None
+            and (
+                upper.startswith("PAID TIME OFF")
+                or upper.startswith("PLAN ")
+                or upper.startswith("EARNINGS")
+                or upper.startswith("DEDUCTIONS")
+                or upper.startswith("TAX")
+            )
+        ):
+            break
+
+    if current is None and ytd is None:
+        return AmountPair(None, None, None)
+
+    return AmountPair(
+        this_period=current,
+        ytd=ytd,
+        source_line=" | ".join(dict.fromkeys(sources)) if sources else "Pay Summary",
+        is_ytd_confirmed=ytd is not None,
+    )
+
+
 def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
+    ukg_pay_summary = extract_ukg_pay_summary_gross_pair(lines)
+    if ukg_pay_summary.this_period is not None or ukg_pay_summary.ytd is not None:
+        return ukg_pay_summary
+
     # Prefer explicit gross labels first. "REGULAR" is kept only as fallback because
     # some layouts have separate regular earnings rows that can collide with gross rows.
     strict = find_line_amount_pair(lines, r"\b(Gross Pay|YTD Gross|Total Gross|Gross)\b")
@@ -416,11 +488,35 @@ def extract_paystub_snapshot(
     pay_date = parse_pay_date_from_text(text)
     if pay_date is None:
         pay_date = parse_pay_date_from_filename(pdf_path)
+    gross_pair = extract_gross_pay_pair(lines)
+
+    source_line = gross_pair.source_line or ""
+    source_upper = source_line.upper()
+    if (
+        gross_pair.this_period is not None
+        and gross_pair.this_period <= Decimal("250.00")
+        and "HOUR" in source_upper
+        and "GROSS" not in source_upper
+    ):
+        evidence = source_line.split(" | ")[0].strip()
+        parse_anomalies.append(
+            {
+                "code": "gross_hours_suspected",
+                "severity": "warning",
+                "message": (
+                    "Gross pay extraction may have captured hours instead of pay amount. "
+                    "Review gross pay evidence line."
+                ),
+                "evidence": evidence,
+                "field_guess": "gross_pay",
+                "line_index": str(lines.index(evidence) + 1) if evidence in lines else "",
+            }
+        )
 
     return PaystubSnapshot(
         file=str(pdf_path),
         pay_date=pay_date.isoformat() if pay_date else None,
-        gross_pay=extract_gross_pay_pair(lines),
+        gross_pay=gross_pair,
         federal_income_tax=find_line_amount_pair(
             lines, r"\b(Federal Income Tax|Fed Income Tax|Federal Tax|withholding)\b"
         ),
@@ -440,20 +536,30 @@ def list_paystub_files(paystub_dir: Path, year: int | None) -> list[Path]:
     filtered: list[Path] = []
     for file_path in files:
         pay_date = parse_pay_date_from_filename(file_path)
-        if pay_date and pay_date.year == year:
+        # Keep unresolved files so users can assign pay dates manually in UI/CLI overrides.
+        if pay_date is None or pay_date.year == year:
             filtered.append(file_path)
     return filtered
 
 
 def select_latest_paystub(files: list[Path]) -> tuple[Path, date]:
     dated: list[tuple[Path, date]] = []
+    unresolved: list[str] = []
     for file_path in files:
         pay_date = parse_pay_date_from_filename(file_path)
         if pay_date is not None:
             dated.append((file_path, pay_date))
+        else:
+            unresolved.append(file_path.name)
     if not dated:
-        raise RuntimeError("Could not determine pay dates from paystub filenames.")
-    return sorted(dated, key=lambda item: item[1])[-1]
+        unresolved_preview = ", ".join(sorted(unresolved)[:5])
+        if len(unresolved) > 5:
+            unresolved_preview += ", ..."
+        raise RuntimeError(
+            "Could not determine pay dates from paystub filenames. "
+            f"Unresolved files: {unresolved_preview or 'none'}."
+        )
+    return sorted(dated, key=lambda item: (item[1], item[0].name))[-1]
 
 
 def as_float(value: Decimal | None) -> float | None:

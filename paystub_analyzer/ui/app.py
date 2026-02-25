@@ -2111,6 +2111,16 @@ def main() -> None:
         st.error(f"No PDFs found in `{paystubs_dir}` for year `{year}`.")
         return
 
+    unresolved_files = [file_path.name for file_path in files if parse_pay_date_from_filename(file_path) is None]
+    if unresolved_files:
+        unresolved_preview = ", ".join(sorted(unresolved_files)[:5])
+        if len(unresolved_files) > 5:
+            unresolved_preview += ", ..."
+        st.warning(
+            "Some paystub filenames do not contain a recognizable pay date and were kept for manual assignment: "
+            f"{unresolved_preview}. Use the pay-date override editor below if needed."
+        )
+
     latest_file, latest_date = select_latest_paystub(files)
     prior_snapshot = st.session_state.get("snapshot")
     prior_w2_validation = st.session_state.get("w2_validation")
