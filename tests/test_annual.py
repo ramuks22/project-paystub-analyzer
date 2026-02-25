@@ -256,6 +256,54 @@ class AnnualTests(unittest.TestCase):
             any(issue["code"] == "state_ytd_outlier_corrected" for issue in result["meta"]["consistency_issues"])
         )
 
+    def test_repairs_state_ytd_delta_when_ocr_drops_leading_digit(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-08-08.pdf",
+            pay_date="2025-08-08",
+            gross_pay=pair("1884.26", "26084.25"),
+            federal_income_tax=pair("116.05", "1536.72"),
+            social_security_tax=pair("116.82", "1617.22"),
+            medicare_tax=pair("27.32", "378.22"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("61.87", "803.42")},
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-08-22.pdf",
+            pay_date="2025-08-22",
+            gross_pay=pair("1504.71", "27788.98"),
+            federal_income_tax=pair("97.59", "1634.31"),
+            social_security_tax=pair("105.70", "1722.92"),
+            medicare_tax=pair("24.72", "402.94"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("53.03", "356.45")},  # OCR drop: should be 856.45
+            normalized_lines=[],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-09-05.pdf",
+            pay_date="2025-09-05",
+            gross_pay=pair("1692.00", "29500.98"),
+            federal_income_tax=pair("120.36", "1754.67"),
+            social_security_tax=pair("119.19", "1842.11"),
+            medicare_tax=pair("27.88", "430.82"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("63.94", "920.39")},
+            normalized_lines=[],
+        )
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+        row_0822 = next(row for row in result["ledger"] if row["pay_date"] == "2025-08-22")
+        self.assertEqual(row_0822["state_tax_ytd_by_state"]["VA"], 856.45)
+        self.assertEqual(row_0822["state_tax_this_period_by_state"]["VA"], 53.03)
+        self.assertTrue(
+            any(issue["code"] == "state_ytd_delta_repaired" for issue in result["meta"]["consistency_issues"])
+        )
+
     def test_repairs_midyear_state_ytd_spike_and_this_period(self) -> None:
         s1 = PaystubSnapshot(
             file="pay_statements/Pay Date 2025-11-14.pdf",
@@ -352,6 +400,102 @@ class AnnualTests(unittest.TestCase):
         self.assertEqual(row_1215["gross_pay_ytd"], 110235.05)
         self.assertTrue(
             any(issue["code"] == "gross_this_period_repaired" for issue in result["meta"]["consistency_issues"])
+        )
+
+    def test_repairs_gross_ytd_from_prev_delta_when_gross_label_missing(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-08-22.pdf",
+            pay_date="2025-08-22",
+            gross_pay=pair("1504.71", "27788.98"),
+            federal_income_tax=pair("97.59", "1634.31"),
+            social_security_tax=pair("105.70", "1722.92"),
+            medicare_tax=pair("24.72", "402.94"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("53.03", "856.45")},
+            normalized_lines=["Regular 23.5000 72.00 1,692.00 24,581.41"],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-09-05.pdf",
+            pay_date="2025-09-05",
+            gross_pay=pair("1692.00", "24581.41"),
+            federal_income_tax=pair("120.36", "1754.67"),
+            social_security_tax=pair("119.19", "1842.11"),
+            medicare_tax=pair("27.88", "430.82"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("63.94", "920.39")},
+            normalized_lines=["Regular 23.5000 72.00 1,692.00 24,581.41"],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-09-15.pdf",
+            pay_date="2025-09-15",
+            gross_pay=pair("0.00", "29711.51"),
+            federal_income_tax=pair(None, "1754.67"),
+            social_security_tax=pair(None, "1842.11"),
+            medicare_tax=pair(None, "430.82"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair(None, "920.39")},
+            normalized_lines=["Gross Pay 80,00 29,711.51"],
+        )
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+        row_0905 = next(row for row in result["ledger"] if row["pay_date"] == "2025-09-05")
+        self.assertEqual(row_0905["gross_pay_ytd"], 29480.98)
+        self.assertTrue(
+            any(issue["code"] == "gross_ytd_delta_repaired" for issue in result["meta"]["consistency_issues"])
+        )
+
+    def test_repairs_state_ytd_delta_when_next_value_is_underflow(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-11-26.pdf",
+            pay_date="2025-11-26",
+            gross_pay=pair("1500.48", "40072.87"),
+            federal_income_tax=pair("78.05", "2353.95"),
+            social_security_tax=pair("93.95", "2484.52"),
+            medicare_tax=pair("21.98", "581.06"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("43.66", "4245.15")},
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-12-12.pdf",
+            pay_date="2025-12-12",
+            gross_pay=pair("940.00", "41399.12"),
+            federal_income_tax=pair("58.53", "2412.48"),
+            social_security_tax=pair("82.23", "2566.75"),
+            medicare_tax=pair("19.23", "600.29"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("34.31", "1279.46")},
+            normalized_lines=[],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-12-26.pdf",
+            pay_date="2025-12-26",
+            gross_pay=pair("1879.53", "36529.77"),
+            federal_income_tax=pair("117.11", "2529.59"),
+            social_security_tax=pair("117.42", "2684.17"),
+            medicare_tax=pair("27.46", "627.75"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("62.38", "1341.84")},
+            normalized_lines=[],
+        )
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+        row_1212 = next(row for row in result["ledger"] if row["pay_date"] == "2025-12-12")
+        row_1226 = next(row for row in result["ledger"] if row["pay_date"] == "2025-12-26")
+        self.assertEqual(row_1212["state_tax_ytd_by_state"]["VA"], 4279.46)
+        self.assertEqual(row_1226["state_tax_ytd_by_state"]["VA"], 4341.84)
+        self.assertTrue(
+            any(issue["code"] == "state_ytd_delta_repaired" for issue in result["meta"]["consistency_issues"])
         )
 
     def test_emits_single_federal_ytd_calc_mismatch_issue(self) -> None:

@@ -1,6 +1,7 @@
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
 
@@ -8,8 +9,12 @@ from paystub_analyzer.core import (
     extract_paystub_snapshot,
     extract_money_values_with_anomalies,
     extract_state_tax_pairs,
+    list_paystub_files,
+    normalize_line,
     parse_amount_pair_from_line,
     parse_pay_date_from_filename,
+    parse_pay_date_from_text,
+    select_latest_paystub,
 )
 
 
@@ -38,6 +43,81 @@ class CoreParsingTests(unittest.TestCase):
         pay_date = parse_pay_date_from_filename(file_path)
         self.assertIsNotNone(pay_date)
         self.assertEqual(pay_date.isoformat(), "2025-09-30")
+
+    def test_filename_pay_date_ukg_format(self) -> None:
+        file_path = Path("pay_statements/spouse/EEPayrollPayCheckDetail_01102025.pdf")
+        pay_date = parse_pay_date_from_filename(file_path)
+        self.assertIsNotNone(pay_date)
+        self.assertEqual(pay_date.isoformat(), "2025-01-10")
+
+    def test_text_pay_date_variants(self) -> None:
+        variants = [
+            "Pay Date 01/10/2025",
+            "Pay Date: 01/10/2025",
+            "Pay Date - 01/10/2025",
+            "Pay Period End 01/10/2025",
+            "Period Ending: 01/10/2025",
+        ]
+        for text in variants:
+            with self.subTest(text=text):
+                parsed = parse_pay_date_from_text(text)
+                self.assertIsNotNone(parsed)
+                assert parsed is not None
+                self.assertEqual(parsed.isoformat(), "2025-01-10")
+
+    def test_text_pay_date_prefers_pay_date_over_period_ending(self) -> None:
+        text = "\n".join(
+            [
+                "Period Ending: 08/16/2025",
+                "Pay Date: 08/22/2025",
+            ]
+        )
+        parsed = parse_pay_date_from_text(text)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed.isoformat(), "2025-08-22")
+
+    def test_text_pay_date_skips_invalid_ocr_candidate(self) -> None:
+        text = "\n".join(
+            [
+                "Period Ending 41/08/2025",
+                "Pay Date 01/10/2025",
+            ]
+        )
+        parsed = parse_pay_date_from_text(text)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed.isoformat(), "2025-01-10")
+
+    def test_list_paystub_files_keeps_unresolved_with_year_filter(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            adp_2025 = temp_path / "Pay Date 2025-12-15.pdf"
+            ukg_2025 = temp_path / "EEPayrollPayCheckDetail_01102025.pdf"
+            adp_2024 = temp_path / "Pay Date 2024-12-31.pdf"
+            unknown = temp_path / "PayrollStatementUnknown.pdf"
+            for path in [adp_2025, ukg_2025, adp_2024, unknown]:
+                path.write_bytes(b"")
+
+            filtered = list_paystub_files(temp_path, year=2025)
+            filtered_names = [path.name for path in filtered]
+            self.assertIn(adp_2025.name, filtered_names)
+            self.assertIn(ukg_2025.name, filtered_names)
+            self.assertIn(unknown.name, filtered_names)
+            self.assertNotIn(adp_2024.name, filtered_names)
+
+    def test_select_latest_paystub_mixed_providers(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            jan_ukg = temp_path / "EEPayrollPayCheckDetail_01102025.pdf"
+            dec_adp = temp_path / "Pay Date 2025-12-26.pdf"
+            unknown = temp_path / "PayrollStatementUnknown.pdf"
+            for path in [jan_ukg, dec_adp, unknown]:
+                path.write_bytes(b"")
+
+            latest_file, latest_date = select_latest_paystub([jan_ukg, unknown, dec_adp])
+            self.assertEqual(latest_file.name, dec_adp.name)
+            self.assertEqual(latest_date.isoformat(), "2025-12-26")
 
     def test_money_regex_blocks_fragment_fusion(self) -> None:
         line = "-658 80 6,531.67"
@@ -80,6 +160,130 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(anomaly["code"], "implausible_amount_filtered")
         self.assertEqual(anomaly["field_guess"], "federal_income_tax")
         self.assertEqual(anomaly["line_index"], "2")
+
+    def test_normalize_line_heals_split_cents_before_ytd_value(self) -> None:
+        line = "VA State Income Tax -60 53 1,138.83"
+        normalized = normalize_line(line)
+        self.assertIn("-60.53", normalized)
+
+    def test_ukg_pay_summary_gross_precedence(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Statement",
+                "Period End Date 01/04/2025",
+                "Pay Date 01/10/2025",
+                "Earnings",
+                "Pay Type Hours Current YTD",
+                "Regular Earning 32.000000 $618.88 $618.88",
+                "Taxes",
+                "Federal Income Tax $81.83 $81.83",
+                "Social Security Employee Tax $96.22 $96.22",
+                "Employee Medicare $22.50 $22.50",
+                "VA State Income Tax $46.02 $46.02",
+                "Pay Summary",
+                "Gross FIT Taxable Wages Taxes Deductions Net Pay",
+                "Current $1,551.92 $1,335.31 $246.57 $221.33 $1,084.02",
+                "YTD $1,551.92 $1,335.31 $246.57 $221.33 $1,084.02",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/EEPayrollPayCheckDetail_01102025.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.pay_date, "2025-01-10")
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1551.92"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("1551.92"))
+        self.assertEqual(snapshot.federal_income_tax.ytd, Decimal("81.83"))
+        self.assertEqual(snapshot.social_security_tax.ytd, Decimal("96.22"))
+        self.assertEqual(snapshot.medicare_tax.ytd, Decimal("22.50"))
+
+    def test_adp_gross_collision_uses_second_amount_as_ytd(self) -> None:
+        text = "\n".join(
+            [
+                "Period Ending: 08/16/2025",
+                "Pay Date: 08/22/2025",
+                "Regular 23.5000 64.03 1,504.71 22,889.41",
+                "Gross Pay 81,704.78 27,788.98 Wellness Admin 1.99 3.98",
+                "Federal Income Tax -97.59 1,634.31",
+                "VA State Income Tax -53.03 356.45",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-08-22.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.pay_date, "2025-08-22")
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1504.71"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("27788.98"))
+
+    def test_adp_regular_line_with_hours_prefers_wage_pair_for_gross(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/05/2025",
+                "Regular 23.5000 72.00 1,692.00 24,581.41",
+                "Federal Income Tax -120.36 1,754.67",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-05.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1692.00"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("24581.41"))
+
+    def test_zero_gross_promotes_single_value_tax_and_state_to_ytd(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/15/2025",
+                "Gross Pay $0.00 29,711.51",
+                "Federal Income Tax 1,754.67",
+                "Social Security Tax 1,842.11",
+                "Medicare Tax 430.82",
+                "VA State Income Tax 920.39",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-15.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertIsNone(snapshot.federal_income_tax.this_period)
+        self.assertEqual(snapshot.federal_income_tax.ytd, Decimal("1754.67"))
+        self.assertIsNone(snapshot.social_security_tax.this_period)
+        self.assertEqual(snapshot.social_security_tax.ytd, Decimal("1842.11"))
+        self.assertIsNone(snapshot.medicare_tax.this_period)
+        self.assertEqual(snapshot.medicare_tax.ytd, Decimal("430.82"))
+        self.assertIsNone(snapshot.state_income_tax["VA"].this_period)
+        self.assertEqual(snapshot.state_income_tax["VA"].ytd, Decimal("920.39"))
+
+    def test_ukg_pay_summary_keeps_ytd_missing_when_summary_ytd_missing(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date 02/21/2025",
+                "Regular Earning 64.000000 $1,563.13 $6,125.96",
+                "Pay Summary",
+                "Current $1,563.13 $1,344.95 $249.15 $222.90 $1,091.08",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/EEPayrollPayCheckDetail_02212025.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1563.13"))
+        self.assertIsNone(snapshot.gross_pay.ytd)
+
+    def test_adp_gross_single_value_with_zero_like_token_sets_this_period_zero(self) -> None:
+        text = "\n".join(
+            [
+                "Pay Date: 09/15/2025",
+                "Gross Pay 80,00 29,711.51 401K Er Basic 888.49",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-09-15.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("0.00"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("29711.51"))
 
 
 if __name__ == "__main__":

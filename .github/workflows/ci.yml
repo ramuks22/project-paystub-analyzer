@@ -83,8 +83,37 @@ jobs:
       - name: Install Dev Tools (for fixture generation)
         run: pip install reportlab
 
-      - name: Build Docker Image
-        run: docker build -t paystub-analyzer:latest .
+      - name: Pull Docker Base Image (Retry)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            echo "Attempt ${attempt}: docker pull python:3.11-slim"
+            if docker pull python:3.11-slim; then
+              echo "Base image pull succeeded."
+              exit 0
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              echo "Base image pull failed after ${attempt} attempts."
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+      - name: Build Docker Image (Retry)
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            echo "Attempt ${attempt}: docker build -t paystub-analyzer:latest ."
+            if docker build -t paystub-analyzer:latest .; then
+              echo "Docker build succeeded."
+              exit 0
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "Docker build failed after ${attempt} attempts."
+              exit 1
+            fi
+            sleep $((attempt * 15))
+          done
 
       # ----------------------------------------------------------------
       # Security Regression Check (.dockerignore)

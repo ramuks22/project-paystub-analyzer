@@ -361,11 +361,39 @@ def verify_and_repair_state_ytd_anomalies(
                     corrected_ytd = prev_ytd
                     corrected_this = None
                     reason = "closing_entry_spike"
+                elif current_ytd < prev_ytd - tolerance and pair.this_period > Decimal("0.00"):
+                    projected_ytd = (prev_ytd + pair.this_period).quantize(Decimal("0.01"))
+                    if projected_ytd > prev_ytd:
+                        corrected_ytd = projected_ytd
+                        reason = "state_ytd_delta_repaired"
             else:
                 baseline_prev_ytd = max(cast(list[Decimal], same_cycle_peer_ytds)) if same_cycle_peer_ytds else prev_ytd
 
                 if (
                     baseline_prev_ytd is not None
+                    and pair.this_period is not None
+                    and pair.this_period > Decimal("0.00")
+                    and current_ytd < baseline_prev_ytd - tolerance
+                ):
+                    # OCR leading-digit drop on YTD (for example 856.45 -> 356.45).
+                    # Rebuild YTD from continuity when this-period is available and monotonic.
+                    projected_ytd = (baseline_prev_ytd + pair.this_period).quantize(Decimal("0.01"))
+                    is_valid_projection = projected_ytd > baseline_prev_ytd
+                    if next_ytd is not None and next_ytd < projected_ytd - STATE_YTD_NEIGHBOR_TOLERANCE:
+                        # When the next value itself dropped below prior baseline,
+                        # treat it as potentially underflowed OCR rather than a hard
+                        # blocker for continuity-based repair on this row.
+                        next_looks_underflow = next_ytd < baseline_prev_ytd - STATE_YTD_NEIGHBOR_TOLERANCE
+                        if not next_looks_underflow:
+                            is_valid_projection = False
+
+                    if is_valid_projection:
+                        corrected_ytd = projected_ytd
+                        reason = "state_ytd_delta_repaired"
+
+                if (
+                    corrected_ytd is None
+                    and baseline_prev_ytd is not None
                     and pair.this_period is None
                     and current_ytd < baseline_prev_ytd - STATE_YTD_OUTLIER_MIN_ABS
                 ):
@@ -392,7 +420,11 @@ def verify_and_repair_state_ytd_anomalies(
                 f"{state} state tax YTD on {target} was auto-corrected from "
                 f"{format_money(current_ytd)} to {format_money(corrected_ytd)} ({reason})."
             )
-            issue_code = reason if reason == "state_ytd_underflow_corrected" else "state_ytd_outlier_corrected"
+            issue_code = (
+                reason
+                if reason in {"state_ytd_underflow_corrected", "state_ytd_delta_repaired"}
+                else "state_ytd_outlier_corrected"
+            )
             issues.append(
                 ConsistencyIssue(
                     severity="warning",
@@ -511,17 +543,54 @@ def verify_and_repair_gross_ytd_anomalies(
             filtered_candidates.append(value)
 
         if not filtered_candidates:
+            if prev_ytd is None or pair.this_period is None or pair.this_period < Decimal("0.00"):
+                continue
+
+            projected_ytd = (prev_ytd + pair.this_period).quantize(Decimal("0.01"))
+            if next_ytd is not None and projected_ytd > next_ytd + tolerance and next_ytd + tolerance >= prev_ytd:
+                continue
+
+            corrected_this = pair.this_period
+            corrected_ytd = projected_ytd
+            snapshot.gross_pay = AmountPair(
+                this_period=corrected_this,
+                ytd=corrected_ytd,
+                source_line=pair.source_line,
+                is_ytd_confirmed=True,
+            )
+
+            target = snapshot.pay_date or snapshot.file
+            issues.append(
+                ConsistencyIssue(
+                    severity="warning",
+                    code="gross_ytd_delta_repaired",
+                    message=(
+                        f"Gross pay YTD on {target} was auto-corrected from "
+                        f"{format_money(pair.ytd)} to {format_money(corrected_ytd)} using prior YTD delta."
+                    ),
+                    evidence=pair.source_line,
+                    field_name="gross_pay",
+                    old_interpretation=(f"this_period={format_money(pair.this_period)}, ytd={format_money(pair.ytd)}"),
+                    new_interpretation=(
+                        f"this_period={format_money(corrected_this)}, ytd={format_money(corrected_ytd)}"
+                    ),
+                    reason="gross_delta_fallback_repair",
+                )
+            )
+            notes_by_file.setdefault(snapshot.file, []).append(
+                f"gross_pay: {format_money(pair.ytd)} -> {format_money(corrected_ytd)}"
+            )
             continue
 
         corrected_ytd = max(filtered_candidates)
-        corrected_this = pair.this_period
+        corrected_this_candidate: Decimal | None = pair.this_period
         if prev_ytd is not None:
             delta = (corrected_ytd - prev_ytd).quantize(Decimal("0.01"))
             if delta >= Decimal("0.00"):
-                corrected_this = delta
+                corrected_this_candidate = delta
 
         snapshot.gross_pay = AmountPair(
-            this_period=corrected_this,
+            this_period=corrected_this_candidate,
             ytd=corrected_ytd,
             source_line=pair.source_line,
             is_ytd_confirmed=True,
@@ -539,7 +608,9 @@ def verify_and_repair_gross_ytd_anomalies(
                 evidence=" | ".join(gross_label_lines[:2]) if gross_label_lines else pair.source_line,
                 field_name="gross_pay",
                 old_interpretation=(f"this_period={format_money(pair.this_period)}, ytd={format_money(pair.ytd)}"),
-                new_interpretation=(f"this_period={format_money(corrected_this)}, ytd={format_money(corrected_ytd)}"),
+                new_interpretation=(
+                    f"this_period={format_money(corrected_this_candidate)}, ytd={format_money(corrected_ytd)}"
+                ),
                 reason="gross_label_continuity_repair",
             )
         )

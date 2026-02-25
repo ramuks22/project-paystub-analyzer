@@ -11,7 +11,7 @@
 > *   The extracted data may contain errors due to OCR imperfections or heuristic failures.
 
 
-This project extracts tax evidence from ADP-style paystubs, cross-verifies it against W-2 values, and generates a filing packet.
+This project extracts tax evidence from ADP and UKG paystubs, cross-verifies it against W-2 values, and generates a filing packet.
 
 Default folders:
 
@@ -24,6 +24,9 @@ Default folders:
 - Extracts from paystubs:
   - Per-paystub values (this period + YTD)
   - Annual chronological ledger across all pay dates
+- Supports mixed-provider folders in the same tax year:
+  - ADP filenames: `Pay Date YYYY-MM-DD*.pdf`
+  - UKG filenames: `EEPayrollPayCheckDetail_MMDDYYYY.pdf`
 - Extracts from latest paystub in a tax year:
   - Gross pay (YTD)
   - Federal income tax withheld (YTD)
@@ -216,6 +219,14 @@ python scripts/freeze_baseline.py \
 ```
 
 Real-data mode refuses writing under `tests/fixtures/` to prevent accidental PII commits.
+
+### Mixed Provider Troubleshooting (ADP + UKG)
+
+- If UKG files are not included in annual runs, keep the strict UKG filename format:
+  - `EEPayrollPayCheckDetail_MMDDYYYY.pdf`
+- Year filtering is filename-based for speed. Files without recognizable dates are still listed so you can assign dates manually.
+- In the UI, use the pay-date override table to assign unresolved filenames (`Assigned Pay Date`, format `YYYY-MM-DD`).
+- If latest-file selection fails, verify at least one file in the folder has a recognizable pay date in its filename.
 
 ### Tests
 
