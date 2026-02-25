@@ -20,8 +20,12 @@ MONEY_RE = re.compile(
 )
 ADP_FILENAME_PAY_DATE_RE = re.compile(r"Pay Date (\d{4}-\d{2}-\d{2})(?:_.*)?\.pdf$", re.IGNORECASE)
 UKG_FILENAME_PAY_DATE_RE = re.compile(r"^EEPayrollPayCheckDetail_(\d{8})\.pdf$", re.IGNORECASE)
-TEXT_PAY_DATE_RE = re.compile(
-    r"(?:Pay Date|Pay Period End|Period Ending)\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})",
+TEXT_PAY_DATE_PRIMARY_RE = re.compile(
+    r"Pay Date\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})",
+    re.IGNORECASE,
+)
+TEXT_PAY_DATE_FALLBACK_RE = re.compile(
+    r"(?:Pay Period End|Period Ending)\s*[:\-]?\s*(\d{2}/\d{2}/\d{4})",
     re.IGNORECASE,
 )
 STATE_TAX_LINE_RE = re.compile(r"\b([A-Z]{2}) State Income Tax\b", re.IGNORECASE)
@@ -198,11 +202,12 @@ def parse_pay_date_from_filename(path: Path) -> date | None:
 
 
 def parse_pay_date_from_text(text: str) -> date | None:
-    for match in TEXT_PAY_DATE_RE.finditer(text):
-        try:
-            return datetime.strptime(match.group(1), "%m/%d/%Y").date()
-        except ValueError:
-            continue
+    for pattern in (TEXT_PAY_DATE_PRIMARY_RE, TEXT_PAY_DATE_FALLBACK_RE):
+        for match in pattern.finditer(text):
+            try:
+                return datetime.strptime(match.group(1), "%m/%d/%Y").date()
+            except ValueError:
+                continue
     return None
 
 
@@ -421,10 +426,65 @@ def extract_ukg_pay_summary_gross_pair(lines: list[str]) -> AmountPair:
     )
 
 
+def extract_regular_wages_pair(lines: list[str]) -> AmountPair:
+    for line in lines:
+        if re.search(r"\b(REGULAR|REGULAR EARNING)\b", line, re.IGNORECASE) is None:
+            continue
+        amounts = [abs(value) for value in extract_money_values(line)]
+        wage_amounts = [amount for amount in amounts if amount >= Decimal("250.00")]
+        if len(wage_amounts) >= 2:
+            return AmountPair(
+                this_period=wage_amounts[0],
+                ytd=wage_amounts[1],
+                source_line=line,
+            )
+    return AmountPair(None, None, None)
+
+
+def extract_adp_gross_line_pair(lines: list[str]) -> AmountPair:
+    for line in lines:
+        if re.search(r"\bGross Pay\b", line, re.IGNORECASE) is None:
+            continue
+
+        amounts = [abs(value) for value in extract_money_values(line)]
+        if len(amounts) < 2:
+            continue
+
+        first = amounts[0]
+        second = amounts[1]
+        if second >= first:
+            return AmountPair(first, second, line, is_ytd_confirmed=True)
+
+        # ADP collision case: OCR can prepend an unrelated larger column before Gross YTD.
+        # Example: "Gross Pay 81,704.78 27,788.98 ...", where 27,788.98 is the true YTD.
+        if first >= Decimal("10000.00") and second >= Decimal("1000.00") and first >= second * Decimal("1.50"):
+            return AmountPair(None, second, line, is_ytd_confirmed=True)
+
+    return AmountPair(None, None, None)
+
+
 def extract_gross_pay_pair(lines: list[str]) -> AmountPair:
     ukg_pay_summary = extract_ukg_pay_summary_gross_pair(lines)
     if ukg_pay_summary.this_period is not None or ukg_pay_summary.ytd is not None:
         return ukg_pay_summary
+
+    adp_gross_line = extract_adp_gross_line_pair(lines)
+    regular_wages = extract_regular_wages_pair(lines)
+    if adp_gross_line.ytd is not None:
+        this_candidate = adp_gross_line.this_period
+        if (
+            this_candidate is None
+            and regular_wages.this_period is not None
+            and regular_wages.this_period < adp_gross_line.ytd
+        ):
+            this_candidate = regular_wages.this_period
+        merged_source_parts = [part for part in [adp_gross_line.source_line, regular_wages.source_line] if part]
+        return AmountPair(
+            this_period=this_candidate,
+            ytd=adp_gross_line.ytd,
+            source_line=" | ".join(dict.fromkeys(merged_source_parts)),
+            is_ytd_confirmed=True,
+        )
 
     # Prefer explicit gross labels first. "REGULAR" is kept only as fallback because
     # some layouts have separate regular earnings rows that can collide with gross rows.

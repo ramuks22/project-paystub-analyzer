@@ -64,6 +64,18 @@ class CoreParsingTests(unittest.TestCase):
                 assert parsed is not None
                 self.assertEqual(parsed.isoformat(), "2025-01-10")
 
+    def test_text_pay_date_prefers_pay_date_over_period_ending(self) -> None:
+        text = "\n".join(
+            [
+                "Period Ending: 08/16/2025",
+                "Pay Date: 08/22/2025",
+            ]
+        )
+        parsed = parse_pay_date_from_text(text)
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertEqual(parsed.isoformat(), "2025-08-22")
+
     def test_text_pay_date_skips_invalid_ocr_candidate(self) -> None:
         text = "\n".join(
             [
@@ -178,6 +190,25 @@ class CoreParsingTests(unittest.TestCase):
         self.assertEqual(snapshot.federal_income_tax.ytd, Decimal("81.83"))
         self.assertEqual(snapshot.social_security_tax.ytd, Decimal("96.22"))
         self.assertEqual(snapshot.medicare_tax.ytd, Decimal("22.50"))
+
+    def test_adp_gross_collision_uses_second_amount_as_ytd(self) -> None:
+        text = "\n".join(
+            [
+                "Period Ending: 08/16/2025",
+                "Pay Date: 08/22/2025",
+                "Regular 23.5000 64.03 1,504.71 22,889.41",
+                "Gross Pay 81,704.78 27,788.98 Wellness Admin 1.99 3.98",
+                "Federal Income Tax -97.59 1,634.31",
+                "VA State Income Tax -53.03 356.45",
+            ]
+        )
+        snapshot = extract_paystub_snapshot(
+            Path("pay_statements/spouse/Pay Date 2025-08-22.pdf"),
+            ocr_text_provider=lambda *_: text,
+        )
+        self.assertEqual(snapshot.pay_date, "2025-08-22")
+        self.assertEqual(snapshot.gross_pay.this_period, Decimal("1504.71"))
+        self.assertEqual(snapshot.gross_pay.ytd, Decimal("27788.98"))
 
 
 if __name__ == "__main__":

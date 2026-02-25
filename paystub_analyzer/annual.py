@@ -366,6 +366,24 @@ def verify_and_repair_state_ytd_anomalies(
 
                 if (
                     baseline_prev_ytd is not None
+                    and pair.this_period is not None
+                    and pair.this_period > Decimal("0.00")
+                    and current_ytd < baseline_prev_ytd - tolerance
+                ):
+                    # OCR leading-digit drop on YTD (for example 856.45 -> 356.45).
+                    # Rebuild YTD from continuity when this-period is available and monotonic.
+                    projected_ytd = (baseline_prev_ytd + pair.this_period).quantize(Decimal("0.01"))
+                    is_valid_projection = projected_ytd > baseline_prev_ytd
+                    if next_ytd is not None and next_ytd < projected_ytd - STATE_YTD_NEIGHBOR_TOLERANCE:
+                        is_valid_projection = False
+
+                    if is_valid_projection:
+                        corrected_ytd = projected_ytd
+                        reason = "state_ytd_delta_repaired"
+
+                if (
+                    corrected_ytd is None
+                    and baseline_prev_ytd is not None
                     and pair.this_period is None
                     and current_ytd < baseline_prev_ytd - STATE_YTD_OUTLIER_MIN_ABS
                 ):
@@ -392,7 +410,11 @@ def verify_and_repair_state_ytd_anomalies(
                 f"{state} state tax YTD on {target} was auto-corrected from "
                 f"{format_money(current_ytd)} to {format_money(corrected_ytd)} ({reason})."
             )
-            issue_code = reason if reason == "state_ytd_underflow_corrected" else "state_ytd_outlier_corrected"
+            issue_code = (
+                reason
+                if reason in {"state_ytd_underflow_corrected", "state_ytd_delta_repaired"}
+                else "state_ytd_outlier_corrected"
+            )
             issues.append(
                 ConsistencyIssue(
                     severity="warning",

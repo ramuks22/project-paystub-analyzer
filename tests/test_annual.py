@@ -256,6 +256,54 @@ class AnnualTests(unittest.TestCase):
             any(issue["code"] == "state_ytd_outlier_corrected" for issue in result["meta"]["consistency_issues"])
         )
 
+    def test_repairs_state_ytd_delta_when_ocr_drops_leading_digit(self) -> None:
+        s1 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-08-08.pdf",
+            pay_date="2025-08-08",
+            gross_pay=pair("1884.26", "26084.25"),
+            federal_income_tax=pair("116.05", "1536.72"),
+            social_security_tax=pair("116.82", "1617.22"),
+            medicare_tax=pair("27.32", "378.22"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("61.87", "803.42")},
+            normalized_lines=[],
+        )
+        s2 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-08-22.pdf",
+            pay_date="2025-08-22",
+            gross_pay=pair("1504.71", "27788.98"),
+            federal_income_tax=pair("97.59", "1634.31"),
+            social_security_tax=pair("105.70", "1722.92"),
+            medicare_tax=pair("24.72", "402.94"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("53.03", "356.45")},  # OCR drop: should be 856.45
+            normalized_lines=[],
+        )
+        s3 = PaystubSnapshot(
+            file="pay_statements/spouse/Pay Date 2025-09-05.pdf",
+            pay_date="2025-09-05",
+            gross_pay=pair("1692.00", "29500.98"),
+            federal_income_tax=pair("120.36", "1754.67"),
+            social_security_tax=pair("119.19", "1842.11"),
+            medicare_tax=pair("27.88", "430.82"),
+            k401_contrib=pair("0.00", "0.00"),
+            state_income_tax={"VA": pair("63.94", "920.39")},
+            normalized_lines=[],
+        )
+
+        result = build_tax_filing_package(
+            tax_year=2025,
+            snapshots=[s1, s2, s3],
+            tolerance=Decimal("0.01"),
+            w2_data=None,
+        )
+        row_0822 = next(row for row in result["ledger"] if row["pay_date"] == "2025-08-22")
+        self.assertEqual(row_0822["state_tax_ytd_by_state"]["VA"], 856.45)
+        self.assertEqual(row_0822["state_tax_this_period_by_state"]["VA"], 53.03)
+        self.assertTrue(
+            any(issue["code"] == "state_ytd_delta_repaired" for issue in result["meta"]["consistency_issues"])
+        )
+
     def test_repairs_midyear_state_ytd_spike_and_this_period(self) -> None:
         s1 = PaystubSnapshot(
             file="pay_statements/Pay Date 2025-11-14.pdf",
